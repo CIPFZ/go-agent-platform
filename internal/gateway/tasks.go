@@ -222,6 +222,13 @@ func (s *TaskStore) pendingCountLocked() int {
 
 func (s *TaskStore) requeueExpiredLocked(now time.Time) {
 	for id, task := range s.tasks {
+		if task.Status == protocol.TaskStatusRunning && task.StartedAt != nil && task.TimeoutSeconds > 0 && !now.Before(task.StartedAt.Add(time.Duration(task.TimeoutSeconds)*time.Second)) {
+			task.Status = protocol.TaskStatusExpired
+			task.FinishedAt = timePtr(now)
+			task.LeaseExpiresAt = nil
+			s.tasks[id] = task
+			continue
+		}
 		if task.LeaseExpiresAt == nil || now.Before(*task.LeaseExpiresAt) || (task.Status != protocol.TaskStatusDispatched && task.Status != protocol.TaskStatusRunning) {
 			continue
 		}

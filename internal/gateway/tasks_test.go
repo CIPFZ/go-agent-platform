@@ -65,6 +65,27 @@ func TestTaskStoreLeaseExpires(t *testing.T) {
 	}
 }
 
+func TestTaskStoreExecutionTimeout(t *testing.T) {
+	clock := &testClock{now: time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)}
+	store := NewTaskStore(TaskConfig{Now: clock.Now, DefaultLease: time.Minute})
+	task, err := store.Create(protocol.CreateTaskRequest{CallerID: "cms", TimeoutSeconds: 2, Action: protocol.TaskAction{Type: protocol.ActionCommandExec, Command: &protocol.CommandAction{Argv: []string{"sleep", "10"}}}})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	task, err = store.Pull("agent-1", time.Minute)
+	if err != nil {
+		t.Fatalf("pull task: %v", err)
+	}
+	if _, err := store.Ack(task.TaskID, "agent-1"); err != nil {
+		t.Fatalf("ack task: %v", err)
+	}
+	clock.now = clock.now.Add(3 * time.Second)
+	timedOut, err := store.Get(task.TaskID)
+	if err != nil || timedOut.Status != protocol.TaskStatusExpired {
+		t.Fatalf("timed out task=%+v err=%v", timedOut, err)
+	}
+}
+
 func BenchmarkTaskStorePull(b *testing.B) {
 	store := NewTaskStore(TaskConfig{MaxQueueSize: b.N + 1})
 	for i := 0; i < b.N; i++ {
