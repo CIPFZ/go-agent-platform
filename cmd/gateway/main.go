@@ -13,6 +13,7 @@ import (
 	"github.com/CIPFZ/go-agent-platform/internal/artifacts"
 	"github.com/CIPFZ/go-agent-platform/internal/audit"
 	"github.com/CIPFZ/go-agent-platform/internal/gateway"
+	"github.com/CIPFZ/go-agent-platform/internal/tlsreload"
 )
 
 func main() {
@@ -71,7 +72,13 @@ func main() {
 	go func() {
 		var err error
 		if *tlsCert != "" {
-			err = server.ListenAndServeTLS(*tlsCert, *tlsKey)
+			config, configErr := tlsreload.NewConfig(*tlsCert, *tlsKey)
+			if configErr != nil {
+				log.Printf("TLS configuration failed: %v", configErr)
+				return
+			}
+			server.TLSConfig = config
+			err = server.ListenAndServeTLS("", "")
 		} else {
 			err = server.ListenAndServe()
 		}

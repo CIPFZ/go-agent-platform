@@ -57,6 +57,7 @@ queued -> dispatched -> running -> succeeded
 - Gateway 可通过 `-artifact-dir` 把制品正文落到独立的持久化卷；任务 JSON 仅保留 `storage_key`、大小、哈希和期限，下载接口会校验哈希并在过期访问时清理对象。
 - Gateway 也可通过 `-artifact-s3-endpoint`、`-artifact-s3-bucket` 和两个凭据文件参数接入 S3/MinIO；凭据文件按每次对象操作读取，支持轮换。
 - 审计可同时写入本地 JSONL（`-audit-log`）和外部 HTTP 收集器（`-audit-url`，凭据由 `-audit-token-file` 热轮换）。外部收集器失败会让 `/healthz` 进入 degraded，避免静默丢失安全事件。
+- Gateway 的 TLS 证书和私钥在每次新握手时重新读取，使用原子文件替换即可轮换证书，无需重启进程。
 - Agent 拉取任务时带租约或确认标记；未确认的任务可以在租约过期后重新分配。
 - 对具有副作用的任务，重试策略必须由动作类型声明，不能由通用 HTTP 重试库盲目重放。
 - 结果回传应可重复提交，Gateway 根据任务 ID 和结果版本去重。
