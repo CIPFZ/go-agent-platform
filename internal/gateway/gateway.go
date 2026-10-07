@@ -39,6 +39,7 @@ type Config struct {
 	AuthTokenFile        string
 	ArtifactStore        artifacts.Store
 	ArtifactDir          string
+	ArtifactS3           *artifacts.S3Config
 }
 
 func (c Config) heartbeatTimeout() time.Duration {
@@ -319,6 +320,9 @@ func NewServer(config Config) *Server {
 	if server.artifactStore == nil && config.ArtifactDir != "" {
 		server.artifactStore, server.artifactStoreErr = artifacts.NewFileStore(config.ArtifactDir)
 	}
+	if server.artifactStore == nil && config.ArtifactS3 != nil {
+		server.artifactStore, server.artifactStoreErr = artifacts.NewS3Store(*config.ArtifactS3)
+	}
 	server.tasks.artifactStore = server.artifactStore
 	return server
 }
@@ -338,6 +342,9 @@ func (s *Server) recordAudit(kind, actor, resource, outcome string, details map[
 func (s *Server) artifactStorageReady() error {
 	if s.artifactStoreErr != nil {
 		return s.artifactStoreErr
+	}
+	if checker, ok := s.artifactStore.(interface{ Health() error }); ok {
+		return checker.Health()
 	}
 	return nil
 }

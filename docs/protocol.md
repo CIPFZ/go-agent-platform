@@ -32,7 +32,7 @@
 | `POST` | `/api/v1/agents/{agent_id}/tasks/pull` | Agent 获取一个租约任务 |
 | `POST` | `/api/v1/tasks/{task_id}/ack` | Agent 确认并进入 `running` |
 | `POST` | `/api/v1/tasks/{task_id}/result` | Agent 提交成功或失败结果 |
-| `GET` | `/api/v1/tasks/{task_id}/artifacts/{artifact_id}` | 下载未过期且仍有内联数据的制品，返回哈希和 `ETag` |
+| `GET` | `/api/v1/tasks/{task_id}/artifacts/{artifact_id}` | 下载未过期且仍可从内联或对象存储取得的制品，返回哈希和 `ETag` |
 
 任务状态由 Gateway 维护：`queued -> dispatched -> running -> succeeded/failed`，取消进入 `cancelled`，租约耗尽进入 `expired`。失败任务在达到 `max_attempts` 前会重新排队。
 
@@ -55,6 +55,7 @@ queued -> dispatched -> running -> succeeded
 - 每个任务有不可变的 `task_id`。
 - 创建任务的调用方可以提供 `idempotency_key`，Gateway 在有效窗口内返回同一个任务，而不是重复创建。
 - Gateway 可通过 `-artifact-dir` 把制品正文落到独立的持久化卷；任务 JSON 仅保留 `storage_key`、大小、哈希和期限，下载接口会校验哈希并在过期访问时清理对象。
+- Gateway 也可通过 `-artifact-s3-endpoint`、`-artifact-s3-bucket` 和两个凭据文件参数接入 S3/MinIO；凭据文件按每次对象操作读取，支持轮换。
 - 审计可同时写入本地 JSONL（`-audit-log`）和外部 HTTP 收集器（`-audit-url`，凭据由 `-audit-token-file` 热轮换）。外部收集器失败会让 `/healthz` 进入 degraded，避免静默丢失安全事件。
 - Agent 拉取任务时带租约或确认标记；未确认的任务可以在租约过期后重新分配。
 - 对具有副作用的任务，重试策略必须由动作类型声明，不能由通用 HTTP 重试库盲目重放。

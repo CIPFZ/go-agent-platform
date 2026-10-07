@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/CIPFZ/go-agent-platform/internal/artifacts"
 	"github.com/CIPFZ/go-agent-platform/internal/audit"
 	"github.com/CIPFZ/go-agent-platform/internal/gateway"
 )
@@ -22,6 +23,12 @@ func main() {
 	auditURL := flag.String("audit-url", "", "external audit collector URL")
 	auditTokenFile := flag.String("audit-token-file", "", "file containing the external audit collector token")
 	artifactDir := flag.String("artifact-dir", "", "durable artifact payload directory")
+	artifactS3Endpoint := flag.String("artifact-s3-endpoint", "", "S3-compatible artifact store endpoint")
+	artifactS3Bucket := flag.String("artifact-s3-bucket", "", "S3-compatible artifact store bucket")
+	artifactS3Prefix := flag.String("artifact-s3-prefix", "", "S3-compatible artifact store key prefix")
+	artifactS3AccessKeyFile := flag.String("artifact-s3-access-key-file", "", "file containing the S3 access key")
+	artifactS3SecretKeyFile := flag.String("artifact-s3-secret-key-file", "", "file containing the S3 secret key")
+	artifactS3Insecure := flag.Bool("artifact-s3-insecure", false, "use HTTP for the S3-compatible artifact store")
 	authToken := flag.String("auth-token", "", "Bearer token required by API clients")
 	authTokenFile := flag.String("auth-token-file", "", "file containing the current Bearer token; reread per request")
 	tlsCert := flag.String("tls-cert", "", "PEM certificate path; enables HTTPS with tls-key")
@@ -49,10 +56,14 @@ func main() {
 	if len(auditSinks) > 0 {
 		auditSink = auditSinks
 	}
+	var artifactS3 *artifacts.S3Config
+	if *artifactS3Endpoint != "" || *artifactS3Bucket != "" || *artifactS3AccessKeyFile != "" || *artifactS3SecretKeyFile != "" {
+		artifactS3 = &artifacts.S3Config{Endpoint: *artifactS3Endpoint, Bucket: *artifactS3Bucket, Prefix: *artifactS3Prefix, AccessKeyFile: *artifactS3AccessKeyFile, SecretKeyFile: *artifactS3SecretKeyFile, UseSSL: !*artifactS3Insecure}
+	}
 
 	server := &http.Server{
 		Addr:              *addr,
-		Handler:           gateway.NewServer(gateway.Config{TaskPersistencePath: *dataFile, AgentPersistencePath: *agentDataFile, AuditSink: auditSink, ArtifactDir: *artifactDir, AuthToken: *authToken, AuthTokenFile: *authTokenFile}).Handler(),
+		Handler:           gateway.NewServer(gateway.Config{TaskPersistencePath: *dataFile, AgentPersistencePath: *agentDataFile, AuditSink: auditSink, ArtifactDir: *artifactDir, ArtifactS3: artifactS3, AuthToken: *authToken, AuthTokenFile: *authTokenFile}).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
