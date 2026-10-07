@@ -77,7 +77,7 @@ func detectCapabilities() []protocol.Capability {
 	if strings.TrimSpace(os.Getenv("DISPLAY")) == "" && strings.TrimSpace(os.Getenv("WAYLAND_DISPLAY")) == "" {
 		return capabilities
 	}
-	for _, helper := range []string{"gnome-screenshot", "scrot", "import"} {
+	for _, helper := range []string{"gnome-screenshot"} {
 		if _, err := exec.LookPath(helper); err == nil {
 			capabilities = append(capabilities, protocol.Capability{
 				Name: string(protocol.ActionDesktopScreenshot), Version: "1",

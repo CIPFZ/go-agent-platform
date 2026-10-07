@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/CIPFZ/go-agent-platform/internal/protocol"
@@ -54,11 +55,48 @@ func TestExecutorFileSandboxAndHash(t *testing.T) {
 	}
 }
 
+func TestExecutorFileWriteIsAtomicForConcurrentCreate(t *testing.T) {
+	workspace := t.TempDir()
+	executor := Executor{Workspace: workspace}
+	const writers = 8
+	results := make(chan protocol.TaskResult, writers)
+	var group sync.WaitGroup
+	for i := 0; i < writers; i++ {
+		group.Add(1)
+		go func(i int) {
+			defer group.Done()
+			results <- executor.Execute(context.Background(), protocol.Task{Action: protocol.TaskAction{Type: protocol.ActionFileWrite, File: &protocol.FileAction{
+				Path: "shared.txt", Content: []byte(strings.Repeat(string(rune('a'+i)), 128)),
+			}}})
+		}(i)
+	}
+	group.Wait()
+	close(results)
+	succeeded := 0
+	for result := range results {
+		if result.Status == protocol.TaskStatusSucceeded {
+			succeeded++
+		}
+	}
+	if succeeded != 1 {
+		t.Fatalf("concurrent create successes=%d, want one", succeeded)
+	}
+}
+
 func TestExecutorScreenshotRequiresDisplay(t *testing.T) {
 	t.Setenv("DISPLAY", "")
 	t.Setenv("WAYLAND_DISPLAY", "")
 	result := (Executor{Workspace: t.TempDir(), ScreenshotCommand: "true"}).Execute(context.Background(), protocol.Task{Action: protocol.TaskAction{Type: protocol.ActionDesktopScreenshot, Screenshot: &protocol.ScreenshotAction{OutputPath: "capture.png"}}})
 	if result.Status != protocol.TaskStatusFailed || result.ErrorCode != "no_display" {
 		t.Fatalf("screenshot result=%+v", result)
+	}
+}
+
+func TestExecutorTimeoutCleansProcessGroup(t *testing.T) {
+	result := (Executor{Workspace: t.TempDir()}).Execute(context.Background(), protocol.Task{Action: protocol.TaskAction{Type: protocol.ActionCommandExec, Command: &protocol.CommandAction{
+		Argv: []string{"sh", "-c", "sleep 30 & wait"}, TimeoutSeconds: 1,
+	}}})
+	if result.Status != protocol.TaskStatusFailed || result.ErrorCode != "timeout" {
+		t.Fatalf("timeout result=%+v", result)
 	}
 }

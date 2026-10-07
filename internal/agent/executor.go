@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -65,6 +66,9 @@ func (e Executor) executeCommand(parent context.Context, action *protocol.Comman
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	command := exec.CommandContext(ctx, program, action.Argv[1:]...)
+	cleanup := configureProcess(command)
+	defer cleanup()
+	command.Dir = e.Workspace
 	if action.WorkingDir != "" {
 		path, err := e.safePath(action.WorkingDir)
 		if err != nil {
@@ -72,14 +76,24 @@ func (e Executor) executeCommand(parent context.Context, action *protocol.Comman
 		}
 		command.Dir = path
 	}
-	if len(action.Environment) > 0 {
-		command.Env = append([]string{}, os.Environ()...)
-		for key, value := range action.Environment {
-			if strings.ContainsAny(key, "=\x00") {
-				return failedResult("invalid_environment", fmt.Errorf("invalid environment key %q", key))
-			}
-			command.Env = append(command.Env, key+"="+value)
+	env := make(map[string]string, len(os.Environ())+len(action.Environment)+1)
+	for _, item := range os.Environ() {
+		key, value, found := strings.Cut(item, "=")
+		if found {
+			env[key] = value
 		}
+	}
+	env["HOME"] = e.Workspace
+	env["LANG"] = "C.UTF-8"
+	for key, value := range action.Environment {
+		if key == "" || strings.ContainsAny(key, "=\x00") || strings.ContainsRune(value, 0) {
+			return failedResult("invalid_environment", fmt.Errorf("invalid environment key %q", key))
+		}
+		env[key] = value
+	}
+	command.Env = make([]string, 0, len(env))
+	for key, value := range env {
+		command.Env = append(command.Env, key+"="+value)
 	}
 	limit := action.OutputLimitByte
 	if limit <= 0 || (e.MaxOutputBytes > 0 && limit > e.MaxOutputBytes) {
@@ -122,21 +136,33 @@ func (e Executor) executeFileRead(action *protocol.FileAction) protocol.TaskResu
 	if limit <= 0 || (e.MaxFileBytes > 0 && limit > e.MaxFileBytes) {
 		limit = e.MaxFileBytes
 	}
-	if limit <= 0 {
-		limit = 16 << 20
+	if limit <= 0 || limit > 2<<20 {
+		limit = 2 << 20
 	}
-	info, err := os.Stat(path)
+	file, err := os.Open(path)
 	if err != nil {
 		return failedResult("file_read", err)
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		return failedResult("file_read", errors.New("path must be a regular file"))
 	}
 	if info.Size() > limit {
 		return failedResult("file_too_large", fmt.Errorf("file is %d bytes, limit is %d", info.Size(), limit))
 	}
-	content, err := os.ReadFile(path)
+	content, err := io.ReadAll(io.LimitReader(file, limit+1))
 	if err != nil {
 		return failedResult("file_read", err)
 	}
-	return protocol.TaskResult{Status: protocol.TaskStatusSucceeded, Stdout: string(content), Artifacts: []protocol.Artifact{artifactFor(path, content)}}
+	if int64(len(content)) > limit {
+		return failedResult("file_too_large", errors.New("file grew past the read limit"))
+	}
+	preview := string(content)
+	if len(content) > 1024 {
+		preview = ""
+	}
+	return protocol.TaskResult{Status: protocol.TaskStatusSucceeded, Stdout: preview, Artifacts: []protocol.Artifact{artifactFor(path, content)}}
 }
 
 func (e Executor) executeFileWrite(action *protocol.FileAction) protocol.TaskResult {
@@ -144,13 +170,12 @@ func (e Executor) executeFileWrite(action *protocol.FileAction) protocol.TaskRes
 	if err != nil {
 		return failedResult("invalid_path", err)
 	}
-	if e.MaxFileBytes > 0 && int64(len(action.Content)) > e.MaxFileBytes {
-		return failedResult("file_too_large", fmt.Errorf("content exceeds %d bytes", e.MaxFileBytes))
+	limit := e.MaxFileBytes
+	if limit <= 0 || limit > 2<<20 {
+		limit = 2 << 20
 	}
-	if !action.Overwrite {
-		if _, statErr := os.Stat(path); statErr == nil {
-			return failedResult("file_exists", os.ErrExist)
-		}
+	if int64(len(action.Content)) > limit {
+		return failedResult("file_too_large", fmt.Errorf("content exceeds %d bytes", limit))
 	}
 	if action.SHA256 != "" {
 		sum := sha256.Sum256(action.Content)
@@ -161,10 +186,36 @@ func (e Executor) executeFileWrite(action *protocol.FileAction) protocol.TaskRes
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return failedResult("file_write", err)
 	}
-	if err := os.WriteFile(path, action.Content, 0o600); err != nil {
+	if err := writeFileAtomic(path, action.Content, action.Overwrite); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return failedResult("file_exists", err)
+		}
 		return failedResult("file_write", err)
 	}
 	return protocol.TaskResult{Status: protocol.TaskStatusSucceeded, Artifacts: []protocol.Artifact{artifactFor(path, action.Content)}}
+}
+
+// Publish a complete file in one filesystem operation. Link provides atomic
+// create-if-absent semantics even when multiple workers target the same path.
+func writeFileAtomic(path string, content []byte, overwrite bool) error {
+	file, err := os.CreateTemp(filepath.Dir(path), ".agent-write-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(file.Name())
+	if _, err = file.Write(content); err == nil {
+		err = file.Sync()
+	}
+	if closeErr := file.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return err
+	}
+	if overwrite {
+		return os.Rename(file.Name(), path)
+	}
+	return os.Link(file.Name(), path)
 }
 
 func (e Executor) executeScreenshot(ctx context.Context, action *protocol.ScreenshotAction) protocol.TaskResult {

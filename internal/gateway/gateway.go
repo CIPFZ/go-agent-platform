@@ -623,7 +623,7 @@ func (s *Server) handleMetrics(writer http.ResponseWriter) {
 }
 
 func decodeJSON(writer http.ResponseWriter, request *http.Request, value any) bool {
-	request.Body = http.MaxBytesReader(writer, request.Body, 1<<20)
+	request.Body = http.MaxBytesReader(writer, request.Body, 4<<20)
 	decoder := json.NewDecoder(request.Body)
 	if err := decoder.Decode(value); err != nil {
 		writeError(writer, request, http.StatusBadRequest, protocol.ErrorInvalidRequest, "invalid JSON body", false)
