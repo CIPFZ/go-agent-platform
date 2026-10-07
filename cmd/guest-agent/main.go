@@ -5,12 +5,14 @@ import (
 	"flag"
 	"log"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/CIPFZ/go-agent-platform/internal/agent"
+	"github.com/CIPFZ/go-agent-platform/internal/protocol"
 )
 
 func main() {
@@ -45,6 +47,7 @@ func main() {
 		Hostname:          hostname,
 		HeartbeatInterval: *interval,
 		AuthToken:         *authToken,
+		Capabilities:      detectCapabilities(),
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -60,4 +63,28 @@ func main() {
 		log.Fatal(err)
 	}
 	log.Printf("guest-agent stopped")
+}
+
+// detectCapabilities reports only actions the current runtime can actually
+// execute. In particular, screenshot support requires both a display session
+// and the configured screenshot helper to be present.
+func detectCapabilities() []protocol.Capability {
+	capabilities := []protocol.Capability{
+		{Name: string(protocol.ActionCommandExec), Version: "1"},
+		{Name: string(protocol.ActionFileRead), Version: "1"},
+		{Name: string(protocol.ActionFileWrite), Version: "1"},
+	}
+	if strings.TrimSpace(os.Getenv("DISPLAY")) == "" && strings.TrimSpace(os.Getenv("WAYLAND_DISPLAY")) == "" {
+		return capabilities
+	}
+	for _, helper := range []string{"gnome-screenshot", "scrot", "import"} {
+		if _, err := exec.LookPath(helper); err == nil {
+			capabilities = append(capabilities, protocol.Capability{
+				Name: string(protocol.ActionDesktopScreenshot), Version: "1",
+				Attributes: map[string]string{"helper": helper},
+			})
+			break
+		}
+	}
+	return capabilities
 }
