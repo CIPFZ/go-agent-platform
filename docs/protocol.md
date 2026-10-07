@@ -32,6 +32,7 @@
 | `POST` | `/api/v1/agents/{agent_id}/tasks/pull` | Agent 获取一个租约任务 |
 | `POST` | `/api/v1/tasks/{task_id}/ack` | Agent 确认并进入 `running` |
 | `POST` | `/api/v1/tasks/{task_id}/result` | Agent 提交成功或失败结果 |
+| `GET` | `/api/v1/tasks/{task_id}/artifacts/{artifact_id}` | 下载未过期且仍有内联数据的制品，返回哈希和 `ETag` |
 
 任务状态由 Gateway 维护：`queued -> dispatched -> running -> succeeded/failed`，取消进入 `cancelled`，租约耗尽进入 `expired`。失败任务在达到 `max_attempts` 前会重新排队。
 
@@ -68,4 +69,4 @@ queued -> dispatched -> running -> succeeded
 
 ## 结果和制品
 
-任务结果应包括状态、开始和结束时间、Agent 版本、错误分类、退出信息和受限输出。截图、较大的文件和完整日志上传到制品存储后，结果只保存制品 ID、大小、哈希、媒体类型和过期时间。
+任务结果应包括状态、开始和结束时间、Agent 版本、错误分类、退出信息和受限输出。小型制品可随结果受限内联并通过制品下载端点读取；过期后内联数据会清除，保留 ID、大小、哈希、媒体类型和过期时间。截图、较大的文件和完整日志接入外部制品存储后，结果只保存制品元数据。

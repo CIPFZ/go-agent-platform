@@ -1,12 +1,58 @@
 package gateway
 
 import (
+	"encoding/base64"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/CIPFZ/go-agent-platform/internal/protocol"
 )
+
+func (s *Server) handleArtifactDownload(writer http.ResponseWriter, request *http.Request, taskID, artifactID string) {
+	task, err := s.tasks.Get(taskID)
+	if errors.Is(err, ErrTaskNotFound) {
+		writeError(writer, request, http.StatusNotFound, protocol.ErrorNotFound, "task not found", false)
+		return
+	}
+	if err != nil || task.Result == nil {
+		writeError(writer, request, http.StatusNotFound, protocol.ErrorNotFound, "artifact not found", false)
+		return
+	}
+	for _, artifact := range task.Result.Artifacts {
+		if artifact.ArtifactID != artifactID {
+			continue
+		}
+		if artifact.DataBase64 == "" {
+			if !artifact.ExpiresAt.IsZero() && !time.Now().UTC().Before(artifact.ExpiresAt) {
+				writeError(writer, request, http.StatusGone, protocol.ErrorNotFound, "artifact expired", false)
+				return
+			}
+			writeError(writer, request, http.StatusNotFound, protocol.ErrorNotFound, "artifact payload unavailable", false)
+			return
+		}
+		content, err := base64.StdEncoding.DecodeString(artifact.DataBase64)
+		if err != nil {
+			writeError(writer, request, http.StatusInternalServerError, protocol.ErrorInternal, "artifact payload invalid", false)
+			return
+		}
+		if artifact.SizeBytes != int64(len(content)) {
+			writeError(writer, request, http.StatusInternalServerError, protocol.ErrorInternal, "artifact size mismatch", false)
+			return
+		}
+		writer.Header().Set("Content-Type", "application/octet-stream")
+		if artifact.MediaType != "" {
+			writer.Header().Set("Content-Type", artifact.MediaType)
+		}
+		writer.Header().Set("Content-Length", fmt.Sprintf("%d", len(content)))
+		writer.Header().Set("ETag", `"`+artifact.SHA256+`"`)
+		writer.Header().Set("Cache-Control", "no-store")
+		_, _ = writer.Write(content)
+		return
+	}
+	writeError(writer, request, http.StatusNotFound, protocol.ErrorNotFound, "artifact not found", false)
+}
 
 func (s *Server) handleCreateTask(writer http.ResponseWriter, request *http.Request) {
 	var body protocol.CreateTaskRequest

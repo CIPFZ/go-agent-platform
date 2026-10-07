@@ -435,6 +435,12 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 				}
 			}
 		}
+		if len(parts) == 3 && parts[0] != "" && parts[1] == "artifacts" && parts[2] != "" {
+			if request.Method == http.MethodGet {
+				s.handleArtifactDownload(writer, request, parts[0], parts[2])
+				return
+			}
+		}
 		writeError(writer, request, http.StatusNotFound, protocol.ErrorNotFound, "endpoint not found", false)
 		return
 	}
