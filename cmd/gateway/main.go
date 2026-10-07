@@ -19,6 +19,9 @@ func main() {
 	dataFile := flag.String("task-store", "", "durable task store JSON path")
 	agentDataFile := flag.String("agent-store", "", "durable agent registry JSON path")
 	auditFile := flag.String("audit-log", "", "append-only audit JSONL path")
+	auditURL := flag.String("audit-url", "", "external audit collector URL")
+	auditTokenFile := flag.String("audit-token-file", "", "file containing the external audit collector token")
+	artifactDir := flag.String("artifact-dir", "", "durable artifact payload directory")
 	authToken := flag.String("auth-token", "", "Bearer token required by API clients")
 	authTokenFile := flag.String("auth-token-file", "", "file containing the current Bearer token; reread per request")
 	tlsCert := flag.String("tls-cert", "", "PEM certificate path; enables HTTPS with tls-key")
@@ -27,18 +30,29 @@ func main() {
 	if (*tlsCert == "") != (*tlsKey == "") {
 		log.Fatal("tls-cert and tls-key must be provided together")
 	}
-	var auditSink audit.Sink
+	var auditSinks audit.MultiSink
 	if *auditFile != "" {
 		sink, err := audit.NewFileSink(*auditFile)
 		if err != nil {
 			log.Fatal(err)
 		}
-		auditSink = sink
+		auditSinks = append(auditSinks, sink)
+	}
+	if *auditURL != "" {
+		sink, err := audit.NewHTTPSink(*auditURL, *auditTokenFile)
+		if err != nil {
+			log.Fatal(err)
+		}
+		auditSinks = append(auditSinks, sink)
+	}
+	var auditSink audit.Sink
+	if len(auditSinks) > 0 {
+		auditSink = auditSinks
 	}
 
 	server := &http.Server{
 		Addr:              *addr,
-		Handler:           gateway.NewServer(gateway.Config{TaskPersistencePath: *dataFile, AgentPersistencePath: *agentDataFile, AuditSink: auditSink, AuthToken: *authToken, AuthTokenFile: *authTokenFile}).Handler(),
+		Handler:           gateway.NewServer(gateway.Config{TaskPersistencePath: *dataFile, AgentPersistencePath: *agentDataFile, AuditSink: auditSink, ArtifactDir: *artifactDir, AuthToken: *authToken, AuthTokenFile: *authTokenFile}).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

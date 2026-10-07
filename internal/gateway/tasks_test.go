@@ -130,7 +130,7 @@ func TestTaskStorePurgesExpiredInlineArtifacts(t *testing.T) {
 		t.Fatal(err)
 	}
 	expires := clock.now.Add(time.Hour)
-	if _, err = store.Result(task.TaskID, "agent", task.LeaseToken, protocol.TaskResult{Status: protocol.TaskStatusSucceeded, Artifacts: []protocol.Artifact{{ArtifactID: "a1", DataBase64: "YWJj", SHA256: "hash", ExpiresAt: expires}}}); err != nil {
+	if _, err = store.Result(task.TaskID, "agent", task.LeaseToken, protocol.TaskResult{Status: protocol.TaskStatusSucceeded, Artifacts: []protocol.Artifact{{ArtifactID: "a1", DataBase64: "YWJj", SHA256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", ExpiresAt: expires}}}); err != nil {
 		t.Fatal(err)
 	}
 	clock.now = expires.Add(time.Second)
@@ -138,7 +138,7 @@ func TestTaskStorePurgesExpiredInlineArtifacts(t *testing.T) {
 	if err != nil || loaded.Result == nil || len(loaded.Result.Artifacts) != 1 {
 		t.Fatalf("loaded=%+v err=%v", loaded, err)
 	}
-	if loaded.Result.Artifacts[0].DataBase64 != "" || loaded.Result.Artifacts[0].SHA256 != "hash" {
+	if loaded.Result.Artifacts[0].DataBase64 != "" || loaded.Result.Artifacts[0].SHA256 != "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" {
 		t.Fatalf("expired payload was not purged: %+v", loaded.Result.Artifacts[0])
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/CIPFZ/go-agent-platform/internal/artifacts"
 	"github.com/CIPFZ/go-agent-platform/internal/protocol"
 )
 
@@ -24,6 +25,7 @@ var (
 	ErrTaskLease           = errors.New("task lease expired or superseded")
 	ErrTaskInvalid         = errors.New("invalid task request")
 	ErrIdempotencyConflict = errors.New("idempotency key was used for different task parameters")
+	ErrArtifactStorage     = errors.New("artifact storage unavailable")
 )
 
 type TaskConfig struct {
@@ -33,6 +35,7 @@ type TaskConfig struct {
 	MaxAgentQueue   int
 	PersistencePath string
 	DefaultLease    time.Duration
+	ArtifactStore   artifacts.Store
 }
 
 type TaskStore struct {
@@ -46,6 +49,7 @@ type TaskStore struct {
 	defaultLease                                time.Duration
 	persistencePath                             string
 	lastPersistenceErr                          error
+	artifactStore                               artifacts.Store
 }
 
 func NewTaskStore(config TaskConfig) *TaskStore {
@@ -65,6 +69,7 @@ func NewTaskStore(config TaskConfig) *TaskStore {
 		config.MaxAgentQueue = config.MaxQueueSize
 	}
 	store := &TaskStore{tasks: make(map[string]protocol.Task), idempotency: make(map[string]string), requests: make(map[string]protocol.CreateTaskRequest), now: config.Now, defaultLease: config.DefaultLease, persistencePath: config.PersistencePath, maxQueueSize: config.MaxQueueSize, maxCallerQueue: config.MaxCallerQueue, maxAgentQueue: config.MaxAgentQueue}
+	store.artifactStore = config.ArtifactStore
 	if config.PersistencePath != "" {
 		if err := store.load(); err != nil {
 			store.lastPersistenceErr = err
@@ -251,6 +256,18 @@ func (s *TaskStore) Result(id, agent, token string, result protocol.TaskResult) 
 	if task.Status == protocol.TaskStatusCancelling && result.Status != protocol.TaskStatusCancelled {
 		return protocol.Task{}, ErrTaskConflict
 	}
+	result, payloads, err := s.prepareArtifacts(task, result)
+	if err != nil {
+		return protocol.Task{}, err
+	}
+	for key, content := range payloads {
+		if err := s.artifactStore.Put(key, content); err != nil {
+			for storedKey := range payloads {
+				_ = s.artifactStore.Delete(storedKey)
+			}
+			return protocol.Task{}, ErrArtifactStorage
+		}
+	}
 	// Execution failures are terminal: a command may have produced side effects.
 	// Only dispatches which were never acknowledged may be redelivered.
 	result.FinishedAt = now
@@ -354,6 +371,9 @@ func (s *TaskStore) purgeExpiredArtifactsLocked(now time.Time) {
 		changed := false
 		for i := range result.Artifacts {
 			artifact := &result.Artifacts[i]
+			if artifact.StorageKey != "" && s.artifactStore != nil && !artifact.ExpiresAt.IsZero() && !now.Before(artifact.ExpiresAt) {
+				_ = s.artifactStore.Delete(artifact.StorageKey)
+			}
 			if artifact.DataBase64 != "" && !artifact.ExpiresAt.IsZero() && !now.Before(artifact.ExpiresAt) {
 				artifact.DataBase64 = ""
 				changed = true

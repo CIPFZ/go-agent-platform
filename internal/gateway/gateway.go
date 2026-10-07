@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/CIPFZ/go-agent-platform/internal/artifacts"
 	"github.com/CIPFZ/go-agent-platform/internal/audit"
 	"github.com/CIPFZ/go-agent-platform/internal/credentials"
 	"github.com/CIPFZ/go-agent-platform/internal/protocol"
@@ -36,6 +37,8 @@ type Config struct {
 	AgentPersistencePath string
 	AuthToken            string
 	AuthTokenFile        string
+	ArtifactStore        artifacts.Store
+	ArtifactDir          string
 }
 
 func (c Config) heartbeatTimeout() time.Duration {
@@ -301,16 +304,23 @@ func (s *Store) Offline(agentID string) (protocol.Agent, error) {
 
 // Server implements the versioned Gateway HTTP API.
 type Server struct {
-	store         *Store
-	tasks         *TaskStore
-	auditSink     audit.Sink
-	authToken     string
-	authTokenFile string
-	requests      atomic.Uint64
+	store            *Store
+	tasks            *TaskStore
+	auditSink        audit.Sink
+	artifactStore    artifacts.Store
+	artifactStoreErr error
+	authToken        string
+	authTokenFile    string
+	requests         atomic.Uint64
 }
 
 func NewServer(config Config) *Server {
-	return &Server{store: NewStore(config), tasks: NewTaskStore(TaskConfig{Now: config.Now, PersistencePath: config.TaskPersistencePath}), auditSink: config.AuditSink, authToken: config.AuthToken, authTokenFile: config.AuthTokenFile}
+	server := &Server{store: NewStore(config), tasks: NewTaskStore(TaskConfig{Now: config.Now, PersistencePath: config.TaskPersistencePath}), auditSink: config.AuditSink, authToken: config.AuthToken, authTokenFile: config.AuthTokenFile, artifactStore: config.ArtifactStore}
+	if server.artifactStore == nil && config.ArtifactDir != "" {
+		server.artifactStore, server.artifactStoreErr = artifacts.NewFileStore(config.ArtifactDir)
+	}
+	server.tasks.artifactStore = server.artifactStore
+	return server
 }
 
 func (s *Server) Store() *Store { return s.store }
@@ -323,6 +333,13 @@ func (s *Server) recordAudit(kind, actor, resource, outcome string, details map[
 	if s.auditSink != nil {
 		s.auditSink.Record(audit.Event{Time: time.Now().UTC(), Kind: kind, Actor: actor, ResourceID: resource, Outcome: outcome, Details: details})
 	}
+}
+
+func (s *Server) artifactStorageReady() error {
+	if s.artifactStoreErr != nil {
+		return s.artifactStoreErr
+	}
+	return nil
 }
 
 func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
@@ -362,7 +379,11 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		statusCode := http.StatusOK
 		_, authErr := s.configuredAuthToken()
 		tasks := s.tasks.List()
-		if authErr != nil || s.store.PersistenceError() != nil || s.tasks.PersistenceError() != nil {
+		var auditErr error
+		if reporter, ok := s.auditSink.(interface{ LastError() error }); ok {
+			auditErr = reporter.LastError()
+		}
+		if authErr != nil || auditErr != nil || s.artifactStoreErr != nil || s.store.PersistenceError() != nil || s.tasks.PersistenceError() != nil {
 			status = "degraded"
 			statusCode = http.StatusServiceUnavailable
 		}

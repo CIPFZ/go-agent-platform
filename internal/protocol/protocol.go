@@ -197,6 +197,7 @@ type Artifact struct {
 	SizeBytes  int64     `json:"size_bytes,omitempty"`
 	SHA256     string    `json:"sha256,omitempty"`
 	DataBase64 string    `json:"data_base64,omitempty"`
+	StorageKey string    `json:"storage_key,omitempty"`
 	ExpiresAt  time.Time `json:"expires_at,omitempty"`
 }
 

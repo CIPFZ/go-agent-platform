@@ -25,14 +25,14 @@ func TestHTTPArtifactDownloadHonorsHashAndExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	content := "artifact-content"
-	if _, err = server.tasks.Result(task.TaskID, "agent", task.LeaseToken, protocol.TaskResult{Status: protocol.TaskStatusSucceeded, Artifacts: []protocol.Artifact{{ArtifactID: "a1", MediaType: "text/plain", SizeBytes: int64(len(content)), SHA256: "test-sha", DataBase64: "YXJ0aWZhY3QtY29udGVudA==", ExpiresAt: time.Now().Add(time.Hour)}}}); err != nil {
+	if _, err = server.tasks.Result(task.TaskID, "agent", task.LeaseToken, protocol.TaskResult{Status: protocol.TaskStatusSucceeded, Artifacts: []protocol.Artifact{{ArtifactID: "a1", MediaType: "text/plain", SizeBytes: int64(len(content)), SHA256: "e7ba55ec4b1cbb1e2a7f7c8a959e545f4db0230bf1e0a84396990601a1cd63ed", DataBase64: "YXJ0aWZhY3QtY29udGVudA==", ExpiresAt: time.Now().Add(time.Hour)}}}); err != nil {
 		t.Fatal(err)
 	}
 	h := server.Handler()
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/"+task.TaskID+"/artifacts/a1", nil)
 	recorder := httptest.NewRecorder()
 	h.ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusOK || recorder.Header().Get("ETag") != `"test-sha"` {
+	if recorder.Code != http.StatusOK || recorder.Header().Get("ETag") != `"e7ba55ec4b1cbb1e2a7f7c8a959e545f4db0230bf1e0a84396990601a1cd63ed"` {
 		t.Fatalf("download status=%d headers=%v", recorder.Code, recorder.Header())
 	}
 	body, _ := io.ReadAll(recorder.Result().Body)

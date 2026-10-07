@@ -1,16 +1,23 @@
 package gateway
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/CIPFZ/go-agent-platform/internal/protocol"
 )
 
 func (s *Server) handleArtifactDownload(writer http.ResponseWriter, request *http.Request, taskID, artifactID string) {
+	if err := s.artifactStorageReady(); err != nil {
+		writeError(writer, request, http.StatusServiceUnavailable, protocol.ErrorInternal, "artifact storage unavailable", true)
+		return
+	}
 	task, err := s.tasks.Get(taskID)
 	if errors.Is(err, ErrTaskNotFound) {
 		writeError(writer, request, http.StatusNotFound, protocol.ErrorNotFound, "task not found", false)
@@ -24,20 +31,40 @@ func (s *Server) handleArtifactDownload(writer http.ResponseWriter, request *htt
 		if artifact.ArtifactID != artifactID {
 			continue
 		}
-		if artifact.DataBase64 == "" {
-			if !artifact.ExpiresAt.IsZero() && !time.Now().UTC().Before(artifact.ExpiresAt) {
-				writeError(writer, request, http.StatusGone, protocol.ErrorNotFound, "artifact expired", false)
+		if !artifact.ExpiresAt.IsZero() && !s.tasks.currentTime().Before(artifact.ExpiresAt) {
+			if artifact.StorageKey != "" && s.artifactStore != nil {
+				_ = s.artifactStore.Delete(artifact.StorageKey)
+			}
+			writeError(writer, request, http.StatusGone, protocol.ErrorNotFound, "artifact expired", false)
+			return
+		}
+		var content []byte
+		if artifact.StorageKey != "" {
+			if s.artifactStore == nil {
+				writeError(writer, request, http.StatusNotFound, protocol.ErrorNotFound, "artifact payload unavailable", false)
 				return
 			}
+			content, err = s.artifactStore.Get(artifact.StorageKey)
+			if err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					writeError(writer, request, http.StatusNotFound, protocol.ErrorNotFound, "artifact payload unavailable", false)
+					return
+				}
+				writeError(writer, request, http.StatusInternalServerError, protocol.ErrorInternal, "artifact payload unavailable", true)
+				return
+			}
+		} else if artifact.DataBase64 != "" {
+			content, err = base64.StdEncoding.DecodeString(artifact.DataBase64)
+			if err != nil {
+				writeError(writer, request, http.StatusInternalServerError, protocol.ErrorInternal, "artifact payload invalid", false)
+				return
+			}
+		} else {
 			writeError(writer, request, http.StatusNotFound, protocol.ErrorNotFound, "artifact payload unavailable", false)
 			return
 		}
-		content, err := base64.StdEncoding.DecodeString(artifact.DataBase64)
-		if err != nil {
-			writeError(writer, request, http.StatusInternalServerError, protocol.ErrorInternal, "artifact payload invalid", false)
-			return
-		}
-		if artifact.SizeBytes != int64(len(content)) {
+		hash := sha256.Sum256(content)
+		if artifact.SizeBytes != int64(len(content)) || artifact.SHA256 != hex.EncodeToString(hash[:]) {
 			writeError(writer, request, http.StatusInternalServerError, protocol.ErrorInternal, "artifact size mismatch", false)
 			return
 		}
@@ -87,6 +114,11 @@ func (s *Server) handleGetTask(writer http.ResponseWriter, request *http.Request
 	task, err := s.tasks.Get(taskID)
 	if errors.Is(err, ErrTaskNotFound) {
 		writeError(writer, request, http.StatusNotFound, protocol.ErrorNotFound, err.Error(), false)
+		return
+	}
+	task, err = s.withArtifactPayloads(task)
+	if err != nil {
+		writeError(writer, request, http.StatusServiceUnavailable, protocol.ErrorInternal, "artifact storage unavailable", true)
 		return
 	}
 	writeJSON(writer, http.StatusOK, protocol.TaskResponse{Envelope: responseEnvelope(request), Task: task})
@@ -187,6 +219,10 @@ func (s *Server) handleAckTask(writer http.ResponseWriter, request *http.Request
 }
 
 func (s *Server) handleTaskResult(writer http.ResponseWriter, request *http.Request, taskID string) {
+	if s.artifactStorageReady() != nil {
+		writeError(writer, request, http.StatusServiceUnavailable, protocol.ErrorInternal, "artifact storage unavailable", true)
+		return
+	}
 	var body protocol.TaskResultRequest
 	if !decodeJSON(writer, request, &body) {
 		return
@@ -200,6 +236,10 @@ func (s *Server) handleTaskResult(writer http.ResponseWriter, request *http.Requ
 	}
 	task, err := s.tasks.Result(taskID, body.AgentID, body.LeaseToken, body.Result)
 	if err != nil {
+		if errors.Is(err, ErrArtifactStorage) {
+			writeError(writer, request, http.StatusServiceUnavailable, protocol.ErrorInternal, "artifact storage unavailable", true)
+			return
+		}
 		status, code := http.StatusBadRequest, protocol.ErrorInvalidRequest
 		if errors.Is(err, ErrTaskNotFound) {
 			status, code = http.StatusNotFound, protocol.ErrorNotFound
