@@ -20,7 +20,12 @@ func main() {
 	agentDataFile := flag.String("agent-store", "", "durable agent registry JSON path")
 	auditFile := flag.String("audit-log", "", "append-only audit JSONL path")
 	authToken := flag.String("auth-token", "", "Bearer token required by API clients")
+	tlsCert := flag.String("tls-cert", "", "PEM certificate path; enables HTTPS with tls-key")
+	tlsKey := flag.String("tls-key", "", "PEM private key path; enables HTTPS with tls-cert")
 	flag.Parse()
+	if (*tlsCert == "") != (*tlsKey == "") {
+		log.Fatal("tls-cert and tls-key must be provided together")
+	}
 	var auditSink audit.Sink
 	if *auditFile != "" {
 		sink, err := audit.NewFileSink(*auditFile)
@@ -38,7 +43,13 @@ func main() {
 
 	log.Printf("gateway listening on %s", *addr)
 	go func() {
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		var err error
+		if *tlsCert != "" {
+			err = server.ListenAndServeTLS(*tlsCert, *tlsKey)
+		} else {
+			err = server.ListenAndServe()
+		}
+		if err != nil && err != http.ErrServerClosed {
 			log.Printf("gateway stopped: %v", err)
 			os.Exit(1)
 		}
