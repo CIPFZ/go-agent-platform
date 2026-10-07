@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,6 +34,10 @@ func TestExecutorFileSandboxAndHash(t *testing.T) {
 	read := executor.Execute(context.Background(), protocol.Task{Action: protocol.TaskAction{Type: protocol.ActionFileRead, File: &protocol.FileAction{Path: "nested/file.txt"}}})
 	if read.Status != protocol.TaskStatusSucceeded || read.Stdout != string(content) || len(read.Artifacts) != 1 {
 		t.Fatalf("read result=%+v", read)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(read.Artifacts[0].DataBase64)
+	if err != nil || string(decoded) != string(content) || read.Artifacts[0].ArtifactID == "" {
+		t.Fatalf("artifact payload=%+v err=%v", read.Artifacts[0], err)
 	}
 	escape := executor.Execute(context.Background(), protocol.Task{Action: protocol.TaskAction{Type: protocol.ActionFileRead, File: &protocol.FileAction{Path: "../outside"}}})
 	if escape.Status != protocol.TaskStatusFailed || !strings.Contains(escape.ErrorMessage, "outside") {

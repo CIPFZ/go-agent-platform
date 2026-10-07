@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -269,7 +270,11 @@ func failedResult(code string, err error) protocol.TaskResult {
 
 func artifactFor(path string, content []byte) protocol.Artifact {
 	sum := sha256.Sum256(content)
-	return protocol.Artifact{Name: filepath.Base(path), SizeBytes: int64(len(content)), SHA256: hex.EncodeToString(sum[:])}
+	artifact := protocol.Artifact{ArtifactID: "artifact-" + hex.EncodeToString(sum[:8]), Name: filepath.Base(path), SizeBytes: int64(len(content)), SHA256: hex.EncodeToString(sum[:]), ExpiresAt: time.Now().UTC().Add(24 * time.Hour)}
+	if len(content) <= 2<<20 {
+		artifact.DataBase64 = base64.StdEncoding.EncodeToString(content)
+	}
+	return artifact
 }
 
 type limitedBuffer struct {
