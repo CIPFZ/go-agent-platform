@@ -1,0 +1,29 @@
+name: Go Agent Platform CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+      - name: Check formatting
+        run: test -z "$(gofmt -l .)"
+      - name: Test
+        run: go test ./...
+      - name: Race test
+        run: go test -race ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Build
+        run: go build ./cmd/gateway ./cmd/guest-agent
+      - name: Gateway benchmark smoke test
+        run: go test ./internal/gateway -run '^$' -bench BenchmarkTaskStorePull -benchtime=1s -benchmem

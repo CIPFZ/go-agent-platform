@@ -1,0 +1,20 @@
+[Unit]
+Description=Go Agent Gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=agent-gateway
+Group=agent-gateway
+ExecStart=/usr/local/bin/go-agent-gateway -addr 127.0.0.1:8081 -task-store /var/lib/go-agent-gateway/tasks.json -agent-store /var/lib/go-agent-gateway/agents.json -audit-log /var/lib/go-agent-gateway/audit.jsonl -auth-token-file /etc/go-agent-gateway/token
+Restart=on-failure
+RestartSec=3s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/go-agent-gateway
+
+[Install]
+WantedBy=multi-user.target

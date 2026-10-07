@@ -30,4 +30,4 @@ ProtectSystem=strict
 ReadWritePaths=/var/lib/go-guest-agent
 ```
 
-The service units are deployment guidance; certificate provisioning, credentials and durable task/audit storage remain environment-specific.
+Ready-to-install unit templates are in `deploy/systemd/`. Copy them to `/etc/systemd/system/`, create the service users and state directories, install the binaries, and place the token files with mode `0600`. The gateway and agent reread token files on every request, so rotating a file does not require a process restart. Add `-tls-cert` and `-tls-key` to the gateway unit when terminating HTTPS locally; otherwise terminate TLS at the trusted reverse proxy.
