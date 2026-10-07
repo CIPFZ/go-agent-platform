@@ -34,6 +34,8 @@ Ready-to-install unit templates are in `deploy/systemd/`. Copy them to `/etc/sys
 
 `deploy/install.sh GATEWAY_BINARY AGENT_BINARY` performs the directory, release, and systemd-unit installation as one repeatable step. Set `ROOT=/tmp/staging PREFIX=/usr/local VERSION=...` for a filesystem-only rehearsal; omit `ROOT` on the host installation. `ENABLE=1` additionally reloads systemd and starts both units on a real host. `deploy/install_test.sh` validates the staged path without changing host services.
 
+Rotate Gateway, Agent, audit, or MinIO credentials with `deploy/rotate-secret.sh /absolute/path/to/secret < value-file`. It writes mode `0600` and atomically replaces the regular file while refusing symlink targets; `deploy/rotate-secret_test.sh` rehearses the flow without exposing a secret in arguments.
+
 For a binary upgrade, run `deploy/release.sh install VERSION GATEWAY_BINARY AGENT_BINARY` with `PREFIX=/usr/local` (or a temporary prefix for rehearsal). The script keeps the prior `current` target as `previous`; `deploy/release.sh rollback` switches the symlink targets back. State files remain under `/var/lib/go-agent-gateway` and `/var/lib/go-guest-agent`, so a binary rollback does not discard task or identity state. Run `deploy/release_test.sh` before installing on a host to rehearse the install, upgrade, and rollback flow without changing system paths.
 
 On Ubuntu, run `deploy/resource_curve.sh output.csv` to collect repeated HTTP benchmark durations and maximum RSS samples. The default 1/2/5-second curve can be extended with `DURATIONS=5,10` when the host can absorb the larger queue; the CSV is suitable for comparing releases over time.
