@@ -10,16 +10,29 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/CIPFZ/go-agent-platform/internal/audit"
 	"github.com/CIPFZ/go-agent-platform/internal/gateway"
 )
 
 func main() {
 	addr := flag.String("addr", ":8081", "HTTP listen address")
+	dataFile := flag.String("task-store", "", "durable task store JSON path")
+	agentDataFile := flag.String("agent-store", "", "durable agent registry JSON path")
+	auditFile := flag.String("audit-log", "", "append-only audit JSONL path")
+	authToken := flag.String("auth-token", "", "Bearer token required by API clients")
 	flag.Parse()
+	var auditSink audit.Sink
+	if *auditFile != "" {
+		sink, err := audit.NewFileSink(*auditFile)
+		if err != nil {
+			log.Fatal(err)
+		}
+		auditSink = sink
+	}
 
 	server := &http.Server{
 		Addr:              *addr,
-		Handler:           gateway.NewServer(gateway.Config{}).Handler(),
+		Handler:           gateway.NewServer(gateway.Config{TaskPersistencePath: *dataFile, AgentPersistencePath: *agentDataFile, AuditSink: auditSink, AuthToken: *authToken}).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

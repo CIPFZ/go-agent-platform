@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -137,5 +138,44 @@ func TestHTTPRegisterHeartbeatAndStatus(t *testing.T) {
 	NewServer(Config{Now: clock.Now}).ServeHTTP(badRecorder, bad)
 	if badRecorder.Code != http.StatusBadRequest {
 		t.Fatalf("invalid register status = %d", badRecorder.Code)
+	}
+}
+
+func TestHTTPAuthTokenProtectsAPI(t *testing.T) {
+	h := NewServer(Config{AuthToken: "secret"}).Handler()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/agents", nil)
+	recorder := httptest.NewRecorder()
+	h.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("missing auth status=%d", recorder.Code)
+	}
+	request = httptest.NewRequest(http.MethodGet, "/api/v1/agents", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	recorder = httptest.NewRecorder()
+	h.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("valid auth status=%d", recorder.Code)
+	}
+}
+
+func TestStorePersistsAgentIdentityAndRevocation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agents.json")
+	first := NewStore(Config{AgentPersistencePath: path})
+	if _, err := first.Register(protocol.RegisterRequest{AgentID: "persisted", AgentVersion: "v1"}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if _, err := first.Revoke("persisted"); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	if err := first.PersistenceError(); err != nil {
+		t.Fatalf("persist agent state: %v", err)
+	}
+	second := NewStore(Config{AgentPersistencePath: path})
+	agent, err := second.Get("persisted")
+	if err != nil {
+		t.Fatalf("load persisted agent: %v", err)
+	}
+	if agent.Status != protocol.AgentStatusRevoked || agent.RevokedAt == nil {
+		t.Fatalf("persisted agent = %+v", agent)
 	}
 }

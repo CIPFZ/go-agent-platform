@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -24,27 +25,15 @@ func TestTaskStoreIdempotencyLeaseAndResult(t *testing.T) {
 	if err != nil || task.Status != protocol.TaskStatusDispatched || task.Attempt != 1 {
 		t.Fatalf("pull task=%+v err=%v", task, err)
 	}
-	if _, err := store.Ack(task.TaskID, "agent-1"); err != nil {
+	if _, err := store.Ack(task.TaskID, "agent-1", task.LeaseToken); err != nil {
 		t.Fatalf("ack task: %v", err)
 	}
-	failed, err := store.Result(task.TaskID, "agent-1", protocol.TaskResult{Status: protocol.TaskStatusFailed, ErrorCode: "exit"})
-	if err != nil || failed.Status != protocol.TaskStatusQueued {
-		t.Fatalf("retry result=%+v err=%v", failed, err)
+	failed, err := store.Result(task.TaskID, "agent-1", task.LeaseToken, protocol.TaskResult{Status: protocol.TaskStatusFailed, ErrorCode: "exit"})
+	if err != nil || failed.Status != protocol.TaskStatusFailed || failed.Result == nil {
+		t.Fatalf("failed result=%+v err=%v", failed, err)
 	}
-	clock.now = clock.now.Add(time.Minute)
-	task, err = store.Pull("agent-2", 0)
-	if err != nil || task.Attempt != 2 || task.AgentID != "agent-2" {
-		t.Fatalf("second pull task=%+v err=%v", task, err)
-	}
-	if _, err := store.Ack(task.TaskID, "agent-2"); err != nil {
-		t.Fatalf("second ack: %v", err)
-	}
-	completed, err := store.Result(task.TaskID, "agent-2", protocol.TaskResult{Status: protocol.TaskStatusSucceeded, Stdout: "ok"})
-	if err != nil || completed.Status != protocol.TaskStatusSucceeded || completed.Result == nil {
-		t.Fatalf("completed task=%+v err=%v", completed, err)
-	}
-	if _, err := store.Pull("agent-3", 0); !errors.Is(err, ErrNoTask) {
-		t.Fatalf("pull after completion error=%v", err)
+	if _, err := store.Pull("agent-2", 0); !errors.Is(err, ErrNoTask) {
+		t.Fatalf("unsafe retry after acknowledged failure error=%v", err)
 	}
 }
 
@@ -76,7 +65,7 @@ func TestTaskStoreExecutionTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pull task: %v", err)
 	}
-	if _, err := store.Ack(task.TaskID, "agent-1"); err != nil {
+	if _, err := store.Ack(task.TaskID, "agent-1", task.LeaseToken); err != nil {
 		t.Fatalf("ack task: %v", err)
 	}
 	clock.now = clock.now.Add(3 * time.Second)
@@ -99,5 +88,29 @@ func BenchmarkTaskStorePull(b *testing.B) {
 		if _, err := store.Pull("agent-bench", 0); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+func TestTaskStorePersistsAcrossRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tasks.json")
+	first := NewTaskStore(TaskConfig{PersistencePath: path})
+	created, err := first.Create(protocol.CreateTaskRequest{CallerID: "cms", IdempotencyKey: "persist-1", Action: protocol.TaskAction{Type: protocol.ActionCommandExec, Command: &protocol.CommandAction{Argv: []string{"true"}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := first.PersistenceError(); err != nil {
+		t.Fatal(err)
+	}
+	second, err := OpenTaskStore(TaskConfig{PersistencePath: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := second.Get(created.TaskID)
+	if err != nil || loaded.TaskID != created.TaskID {
+		t.Fatalf("loaded=%+v err=%v", loaded, err)
+	}
+	again, err := second.Create(protocol.CreateTaskRequest{CallerID: "cms", IdempotencyKey: "persist-1", Action: protocol.TaskAction{Type: protocol.ActionCommandExec, Command: &protocol.CommandAction{Argv: []string{"true"}}}})
+	if err != nil || again.TaskID != created.TaskID {
+		t.Fatalf("idempotency after restart=%+v err=%v", again, err)
 	}
 }

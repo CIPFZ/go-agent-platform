@@ -20,6 +20,9 @@ func (s *Server) handleCreateTask(writer http.ResponseWriter, request *http.Requ
 	task, err := s.tasks.Create(body)
 	if err != nil {
 		status, code := http.StatusBadRequest, protocol.ErrorInvalidRequest
+		if errors.Is(err, ErrIdempotencyConflict) {
+			status, code = http.StatusConflict, protocol.ErrorConflict
+		}
 		if errors.Is(err, ErrQueueFull) {
 			status, code = http.StatusTooManyRequests, protocol.ErrorConflict
 		}
@@ -54,8 +57,11 @@ func (s *Server) handleCancelTask(writer http.ResponseWriter, request *http.Requ
 	}
 	task, err := s.tasks.Cancel(taskID)
 	if err != nil {
-		status, code := http.StatusNotFound, protocol.ErrorNotFound
-		if errors.Is(err, ErrTaskConflict) {
+		status, code := http.StatusBadRequest, protocol.ErrorInvalidRequest
+		if errors.Is(err, ErrTaskNotFound) {
+			status, code = http.StatusNotFound, protocol.ErrorNotFound
+		}
+		if errors.Is(err, ErrTaskConflict) || errors.Is(err, ErrTaskLease) || errors.Is(err, ErrIdempotencyConflict) {
 			status, code = http.StatusConflict, protocol.ErrorConflict
 		}
 		writeError(writer, request, status, code, err.Error(), false)
@@ -83,13 +89,17 @@ func (s *Server) handlePullTask(writer http.ResponseWriter, request *http.Reques
 		writeError(writer, request, http.StatusForbidden, protocol.ErrorRevoked, "agent has been revoked", false)
 		return
 	}
+	if body.LeaseSeconds < 0 || body.LeaseSeconds > 300 {
+		writeError(writer, request, http.StatusBadRequest, protocol.ErrorInvalidRequest, "lease_seconds must be 0..300", false)
+		return
+	}
 	var lease time.Duration
 	if body.LeaseSeconds > 0 {
 		lease = time.Duration(body.LeaseSeconds) * time.Second
 	}
 	task, err := s.tasks.Pull(agentID, lease)
 	if errors.Is(err, ErrNoTask) {
-		writeError(writer, request, http.StatusNoContent, protocol.ErrorNotFound, err.Error(), false)
+		writer.WriteHeader(http.StatusNoContent)
 		return
 	}
 	if err != nil {
@@ -100,10 +110,7 @@ func (s *Server) handlePullTask(writer http.ResponseWriter, request *http.Reques
 	writeJSON(writer, http.StatusOK, protocol.TaskResponse{Envelope: responseEnvelope(request), Task: task})
 }
 
-type taskAgentRequest struct {
-	protocol.Envelope
-	AgentID string `json:"agent_id"`
-}
+type taskAgentRequest = protocol.TaskLeaseRequest
 
 func (s *Server) handleAckTask(writer http.ResponseWriter, request *http.Request, taskID string) {
 	var body taskAgentRequest
@@ -114,10 +121,16 @@ func (s *Server) handleAckTask(writer http.ResponseWriter, request *http.Request
 		writeEnvelopeError(writer, request, err)
 		return
 	}
-	task, err := s.tasks.Ack(taskID, body.AgentID)
+	if !s.requireActiveAgent(writer, request, body.AgentID) {
+		return
+	}
+	task, err := s.tasks.Ack(taskID, body.AgentID, body.LeaseToken)
 	if err != nil {
-		status, code := http.StatusNotFound, protocol.ErrorNotFound
-		if errors.Is(err, ErrTaskConflict) {
+		status, code := http.StatusBadRequest, protocol.ErrorInvalidRequest
+		if errors.Is(err, ErrTaskNotFound) {
+			status, code = http.StatusNotFound, protocol.ErrorNotFound
+		}
+		if errors.Is(err, ErrTaskConflict) || errors.Is(err, ErrTaskLease) || errors.Is(err, ErrIdempotencyConflict) {
 			status, code = http.StatusConflict, protocol.ErrorConflict
 		}
 		writeError(writer, request, status, code, err.Error(), false)
@@ -136,10 +149,16 @@ func (s *Server) handleTaskResult(writer http.ResponseWriter, request *http.Requ
 		writeEnvelopeError(writer, request, err)
 		return
 	}
-	task, err := s.tasks.Result(taskID, body.AgentID, body.Result)
+	if !s.requireActiveAgent(writer, request, body.AgentID) {
+		return
+	}
+	task, err := s.tasks.Result(taskID, body.AgentID, body.LeaseToken, body.Result)
 	if err != nil {
-		status, code := http.StatusNotFound, protocol.ErrorNotFound
-		if errors.Is(err, ErrTaskConflict) {
+		status, code := http.StatusBadRequest, protocol.ErrorInvalidRequest
+		if errors.Is(err, ErrTaskNotFound) {
+			status, code = http.StatusNotFound, protocol.ErrorNotFound
+		}
+		if errors.Is(err, ErrTaskConflict) || errors.Is(err, ErrTaskLease) || errors.Is(err, ErrIdempotencyConflict) {
 			status, code = http.StatusConflict, protocol.ErrorConflict
 		}
 		writeError(writer, request, status, code, err.Error(), false)
@@ -147,4 +166,40 @@ func (s *Server) handleTaskResult(writer http.ResponseWriter, request *http.Requ
 	}
 	s.recordAudit("task.result", body.AgentID, task.TaskID, string(body.Result.Status), nil)
 	writeJSON(writer, http.StatusOK, protocol.TaskResponse{Envelope: responseEnvelope(request), Task: task})
+}
+
+func (s *Server) handleRenewTask(w http.ResponseWriter, r *http.Request, id string) {
+	var body protocol.TaskLeaseRequest
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	if err := body.Envelope.Validate(); err != nil {
+		writeEnvelopeError(w, r, err)
+		return
+	}
+	if !s.requireActiveAgent(w, r, body.AgentID) {
+		return
+	}
+	task, err := s.tasks.Renew(id, body.AgentID, body.LeaseToken)
+	if err != nil {
+		status, code := http.StatusConflict, protocol.ErrorConflict
+		if errors.Is(err, ErrTaskNotFound) {
+			status, code = http.StatusNotFound, protocol.ErrorNotFound
+		}
+		writeError(w, r, status, code, err.Error(), false)
+		return
+	}
+	writeJSON(w, http.StatusOK, protocol.TaskResponse{Envelope: responseEnvelope(r), Task: task})
+}
+func (s *Server) requireActiveAgent(w http.ResponseWriter, r *http.Request, id string) bool {
+	a, err := s.store.Get(id)
+	if err != nil {
+		writeError(w, r, http.StatusNotFound, protocol.ErrorNotFound, "agent not found", false)
+		return false
+	}
+	if a.Status == protocol.AgentStatusRevoked {
+		writeError(w, r, http.StatusForbidden, protocol.ErrorRevoked, "agent has been revoked", false)
+		return false
+	}
+	return true
 }

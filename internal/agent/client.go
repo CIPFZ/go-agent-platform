@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -33,6 +35,7 @@ type Config struct {
 	HeartbeatInterval time.Duration
 	RequestTimeout    time.Duration
 	HTTPClient        *http.Client
+	AuthToken         string
 	Now               func() time.Time
 }
 
@@ -128,11 +131,8 @@ func (c *Client) PullTask(ctx context.Context, leaseSeconds int64) (protocol.Tas
 	return response.Task, nil
 }
 
-func (c *Client) AckTask(ctx context.Context, taskID string) (protocol.Task, error) {
-	request := struct {
-		protocol.Envelope
-		AgentID string `json:"agent_id"`
-	}{Envelope: c.envelope(), AgentID: c.config.AgentID}
+func (c *Client) AckTask(ctx context.Context, taskID, leaseToken string) (protocol.Task, error) {
+	request := protocol.TaskLeaseRequest{Envelope: c.envelope(), AgentID: c.config.AgentID, LeaseToken: leaseToken}
 	var response protocol.TaskResponse
 	if err := c.doJSON(ctx, http.MethodPost, "/api/v1/tasks/"+taskID+"/ack", request, &response); err != nil {
 		return protocol.Task{}, err
@@ -140,8 +140,8 @@ func (c *Client) AckTask(ctx context.Context, taskID string) (protocol.Task, err
 	return response.Task, nil
 }
 
-func (c *Client) SubmitTaskResult(ctx context.Context, taskID string, result protocol.TaskResult) (protocol.Task, error) {
-	request := protocol.TaskResultRequest{Envelope: c.envelope(), AgentID: c.config.AgentID, Result: result}
+func (c *Client) SubmitTaskResult(ctx context.Context, taskID, leaseToken string, result protocol.TaskResult) (protocol.Task, error) {
+	request := protocol.TaskResultRequest{Envelope: c.envelope(), AgentID: c.config.AgentID, LeaseToken: leaseToken, Result: result}
 	var response protocol.TaskResponse
 	if err := c.doJSON(ctx, http.MethodPost, "/api/v1/tasks/"+taskID+"/result", request, &response); err != nil {
 		return protocol.Task{}, err
@@ -151,29 +151,7 @@ func (c *Client) SubmitTaskResult(ctx context.Context, taskID string, result pro
 
 // Run registers once, sends heartbeats, and attempts a best-effort clean shutdown.
 func (c *Client) Run(ctx context.Context) error {
-	if _, err := c.Register(ctx); err != nil {
-		return err
-	}
-	defer func() {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), c.config.RequestTimeout)
-		_, _ = c.Offline(shutdownCtx)
-		cancel()
-	}()
-	ticker := time.NewTicker(c.config.HeartbeatInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-			if _, err := c.Heartbeat(ctx); err != nil {
-				if ctx.Err() != nil {
-					return ctx.Err()
-				}
-				return err
-			}
-		}
-	}
+	return (&Runner{Client: c}).Run(ctx)
 }
 
 func (c *Client) envelope() protocol.Envelope {
@@ -181,6 +159,8 @@ func (c *Client) envelope() protocol.Envelope {
 }
 
 func (c *Client) doJSON(ctx context.Context, method, path string, requestBody any, responseBody any) error {
+	ctx, cancel := context.WithTimeout(ctx, c.config.RequestTimeout)
+	defer cancel()
 	payload, err := json.Marshal(requestBody)
 	if err != nil {
 		return fmt.Errorf("marshal request: %w", err)
@@ -190,6 +170,9 @@ func (c *Client) doJSON(ctx context.Context, method, path string, requestBody an
 		return fmt.Errorf("create request: %w", err)
 	}
 	request.Header.Set("Content-Type", "application/json")
+	if c.config.AuthToken != "" {
+		request.Header.Set("Authorization", "Bearer "+c.config.AuthToken)
+	}
 	response, err := c.httpClient.Do(request)
 	if err != nil {
 		return fmt.Errorf("gateway request: %w", err)
@@ -200,12 +183,12 @@ func (c *Client) doJSON(ctx context.Context, method, path string, requestBody an
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		var apiError protocol.ErrorResponse
-		if decodeErr := json.NewDecoder(response.Body).Decode(&apiError); decodeErr == nil && apiError.Error.Message != "" {
-			return fmt.Errorf("gateway returned %s: %s", apiError.Error.Code, apiError.Error.Message)
+		if decodeErr := json.NewDecoder(io.LimitReader(response.Body, 4<<20)).Decode(&apiError); decodeErr == nil && apiError.Error.Message != "" {
+			return &HTTPError{StatusCode: response.StatusCode, APIError: apiError.Error}
 		}
-		return fmt.Errorf("gateway returned HTTP %s", response.Status)
+		return &HTTPError{StatusCode: response.StatusCode, APIError: protocol.APIError{Message: response.Status}}
 	}
-	if err := json.NewDecoder(response.Body).Decode(responseBody); err != nil {
+	if err := json.NewDecoder(io.LimitReader(response.Body, 4<<20)).Decode(responseBody); err != nil {
 		return fmt.Errorf("decode gateway response: %w", err)
 	}
 	return nil
@@ -233,4 +216,28 @@ func newRequestID() string {
 		return fmt.Sprintf("agent-%d", time.Now().UnixNano())
 	}
 	return "agent-" + hex.EncodeToString(buffer)
+}
+
+func (c *Client) RenewTask(ctx context.Context, id, token string) (protocol.Task, error) {
+	var response protocol.TaskResponse
+	err := c.doJSON(ctx, http.MethodPost, "/api/v1/tasks/"+id+"/renew", protocol.TaskLeaseRequest{Envelope: c.envelope(), AgentID: c.config.AgentID, LeaseToken: token}, &response)
+	return response.Task, err
+}
+
+// HTTPError preserves retry and status information across the transport boundary.
+type HTTPError struct {
+	StatusCode int
+	APIError   protocol.APIError
+}
+
+func (e *HTTPError) Error() string {
+	return fmt.Sprintf("gateway HTTP %d: %s", e.StatusCode, e.APIError.Message)
+}
+func temporary(err error) bool {
+	var h *HTTPError
+	if errors.As(err, &h) {
+		return h.StatusCode == 429 || h.StatusCode >= 500
+	}
+	var n net.Error
+	return errors.As(err, &n)
 }

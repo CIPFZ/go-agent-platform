@@ -6,92 +6,258 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/CIPFZ/go-agent-platform/internal/protocol"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
-// Runner owns the registration and heartbeat lifecycle of one guest agent.
+// Runner maintains independent heartbeats and a bounded worker pool.
 type Runner struct {
 	Client            *Client
 	HeartbeatInterval time.Duration
 	ShutdownTimeout   time.Duration
 	TaskPollInterval  time.Duration
-	Executor          *Executor
+	LeaseSeconds      int64
+	Workers           int
+	Executor          TaskExecutor
 }
 
-func (r *Runner) Run(ctx context.Context) error {
+// TaskExecutor is the execution boundary used by Runner. Keeping it small
+// lets deployments provide a specialized executor and lets cancellation tests
+// exercise the worker lifecycle without starting host processes.
+type TaskExecutor interface {
+	Execute(context.Context, protocol.Task) protocol.TaskResult
+}
+
+func (r *Runner) Run(parent context.Context) error {
 	if r == nil || r.Client == nil {
 		return errors.New("agent client is required")
 	}
-	interval := r.HeartbeatInterval
-	if interval <= 0 {
-		interval = 15 * time.Second
-	}
-	pollInterval := r.TaskPollInterval
-	if pollInterval <= 0 {
-		pollInterval = interval
-	}
-	if _, err := r.Client.Register(ctx); err != nil {
+	ctx, cancel := context.WithCancel(parent)
+	defer cancel()
+	if err := retry(ctx, func() error { _, err := r.Client.Register(ctx); return err }); err != nil {
 		return fmt.Errorf("register agent: %w", err)
 	}
 	defer r.offline()
-	ticker := time.NewTicker(interval)
+	interval := r.HeartbeatInterval
+	if interval <= 0 {
+		interval = r.Client.config.HeartbeatInterval
+	}
+	poll := r.TaskPollInterval
+	if poll <= 0 {
+		poll = time.Second
+	}
+	leaseSeconds := r.LeaseSeconds
+	if leaseSeconds <= 0 {
+		leaseSeconds = 30
+	}
+	workers := r.Workers
+	if workers <= 0 {
+		workers = 1
+	}
+	if workers > 64 {
+		return errors.New("workers must not exceed 64")
+	}
+	errorsCh := make(chan error, workers+1)
+	var wg sync.WaitGroup
+	launch := func(fn func() error) { wg.Add(1); go func() { defer wg.Done(); errorsCh <- fn() }() }
+	launch(func() error {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-ticker.C:
+				err := retry(ctx, func() error {
+					_, err := r.Client.Heartbeat(ctx)
+					var h *HTTPError
+					if errors.As(err, &h) && h.StatusCode == 404 {
+						_, err = r.Client.Register(ctx)
+					}
+					return err
+				})
+				if err != nil {
+					return fmt.Errorf("heartbeat: %w", err)
+				}
+			}
+		}
+	})
+	if r.Executor != nil {
+		for i := 0; i < workers; i++ {
+			launch(func() error {
+				for {
+					err := retry(ctx, func() error { return r.processOneTask(ctx, leaseSeconds) })
+					if err != nil {
+						return err
+					}
+					if err = waitContext(ctx, poll); err != nil {
+						return err
+					}
+				}
+			})
+		}
+	}
+	var err error
+	select {
+	case <-ctx.Done():
+		err = ctx.Err()
+	case err = <-errorsCh:
+	}
+	cancel()
+	wg.Wait()
+	return err
+}
+func (r *Runner) offline() {
+	timeout := r.ShutdownTimeout
+	if timeout <= 0 {
+		timeout = 3 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	_, _ = r.Client.Offline(ctx)
+}
+
+func (r *Runner) processOneTask(ctx context.Context, leaseSeconds int64) error {
+	task, err := r.Client.PullTask(ctx, leaseSeconds)
+	if errors.Is(err, ErrNoTask) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	// A repeated acknowledgement is safe because the lease token is immutable.
+	if err = retry(ctx, func() error { var e error; task, e = r.Client.AckTask(ctx, task.TaskID, task.LeaseToken); return e }); err != nil {
+		return err
+	}
+	taskCtx, cancel := context.WithCancel(ctx)
+	if task.TimeoutSeconds > 0 {
+		cancel()
+		taskCtx, cancel = context.WithTimeout(ctx, time.Duration(task.TimeoutSeconds)*time.Second)
+	}
+	defer cancel()
+	done := make(chan protocol.TaskResult, 1)
+	go func() { done <- r.Executor.Execute(taskCtx, task) }()
+	leaseExpires := time.Now().Add(30 * time.Second)
+	if task.LeaseExpiresAt != nil {
+		leaseExpires = *task.LeaseExpiresAt
+	}
+	renewEvery := time.Until(leaseExpires) / 3
+	if renewEvery > time.Second {
+		renewEvery = time.Second
+	}
+	if renewEvery < 10*time.Millisecond {
+		renewEvery = 10 * time.Millisecond
+	}
+	ticker := time.NewTicker(renewEvery)
 	defer ticker.Stop()
-	lastTaskPoll := time.Time{}
+	leaseDeadline := leaseExpires
+	cancelled := false
+	var result protocol.TaskResult
 	for {
 		select {
-		case <-ctx.Done():
+		case result = <-done:
+			if cancelled {
+				result.Status = protocol.TaskStatusCancelled
+				result.ErrorCode = "cancelled"
+			}
+			// Cleanup result delivery uses its own bounded context on service shutdown.
+			sendCtx, stop := context.WithTimeout(context.Background(), r.Client.config.RequestTimeout)
+			defer stop()
+			err = retry(sendCtx, func() error {
+				_, e := r.Client.SubmitTaskResult(sendCtx, task.TaskID, task.LeaseToken, result)
+				return e
+			})
+			var h *HTTPError
+			if errors.As(err, &h) && h.StatusCode == 409 {
+				return nil
+			} // lease/cancellation won the race
+			return err
+		case <-taskCtx.Done():
+			// Executors should observe cancellation, but a broken plugin must not
+			// hold the worker forever during shutdown or lease loss.
+			select {
+			case result = <-done:
+			case <-time.After(r.shutdownGrace()):
+				result = protocol.TaskResult{Status: protocol.TaskStatusCancelled, ErrorCode: "cancelled", ErrorMessage: "executor did not stop after cancellation"}
+			}
+			if cancelled || ctx.Err() != nil {
+				result.Status = protocol.TaskStatusCancelled
+				result.ErrorCode = "cancelled"
+			}
+			sendCtx, stop := context.WithTimeout(context.Background(), r.Client.config.RequestTimeout)
+			_, _ = r.Client.SubmitTaskResult(sendCtx, task.TaskID, task.LeaseToken, result)
+			stop()
 			return ctx.Err()
 		case <-ticker.C:
-			if _, err := r.Client.Heartbeat(ctx); err != nil {
-				if ctx.Err() != nil {
-					return ctx.Err()
+			renewCtx, stop := context.WithDeadline(ctx, leaseDeadline)
+			renewed, e := r.Client.RenewTask(renewCtx, task.TaskID, task.LeaseToken)
+			stop()
+			if e != nil {
+				if !temporary(e) || !time.Now().Before(leaseDeadline) {
+					cancel()
+					_, _ = r.awaitResult(done)
+					var h *HTTPError
+					if errors.As(e, &h) && h.StatusCode == 409 {
+						return nil
+					}
+					return e
 				}
-				return fmt.Errorf("heartbeat agent: %w", err)
+				continue
 			}
-			if r.Executor != nil && (lastTaskPoll.IsZero() || time.Since(lastTaskPoll) >= pollInterval) {
-				lastTaskPoll = time.Now()
-				if err := r.processOneTask(ctx); err != nil {
-					return err
-				}
+			if renewed.Status == protocol.TaskStatusCancelling {
+				cancelled = true
+				cancel()
+			} else if renewed.LeaseExpiresAt != nil {
+				leaseDeadline = *renewed.LeaseExpiresAt
 			}
 		}
 	}
 }
 
-func (r *Runner) offline() {
-	shutdownTimeout := r.ShutdownTimeout
-	if shutdownTimeout <= 0 {
-		shutdownTimeout = 3 * time.Second
+func (r *Runner) awaitResult(done <-chan protocol.TaskResult) (protocol.TaskResult, bool) {
+	select {
+	case result := <-done:
+		return result, true
+	case <-time.After(r.shutdownGrace()):
+		return protocol.TaskResult{Status: protocol.TaskStatusCancelled, ErrorCode: "cancelled", ErrorMessage: "executor did not stop after lease loss"}, false
 	}
-	shutdownContext, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-	_, _ = r.Client.Offline(shutdownContext)
-	cancel()
 }
 
-func (r *Runner) processOneTask(ctx context.Context) error {
-	task, err := r.Client.PullTask(ctx, 30)
-	if errors.Is(err, ErrNoTask) {
+func (r *Runner) shutdownGrace() time.Duration {
+	grace := r.ShutdownTimeout
+	if grace <= 0 || grace > 5*time.Second {
+		grace = 5 * time.Second
+	}
+	return grace
+}
+
+func retry(ctx context.Context, fn func() error) error {
+	delay := 100 * time.Millisecond
+	for {
+		err := fn()
+		if err == nil || !temporary(err) {
+			return err
+		}
+		if err = waitContext(ctx, delay); err != nil {
+			return err
+		}
+		if delay < 2*time.Second {
+			delay *= 2
+		}
+	}
+}
+func waitContext(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
 		return nil
 	}
-	if err != nil {
-		return fmt.Errorf("pull task: %w", err)
-	}
-	if _, err := r.Client.AckTask(ctx, task.TaskID); err != nil {
-		return fmt.Errorf("ack task: %w", err)
-	}
-	taskContext := ctx
-	cancel := func() {}
-	if task.TimeoutSeconds > 0 {
-		taskContext, cancel = context.WithTimeout(ctx, time.Duration(task.TimeoutSeconds)*time.Second)
-	}
-	result := r.Executor.Execute(taskContext, task)
-	cancel()
-	if _, err := r.Client.SubmitTaskResult(ctx, task.TaskID, result); err != nil {
-		return fmt.Errorf("submit task result: %w", err)
-	}
-	return nil
 }
 
 // LoadOrCreateID persists the identity so an agent restart does not register a new identity.

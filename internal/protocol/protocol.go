@@ -149,6 +149,7 @@ const (
 	TaskStatusSucceeded  TaskStatus = "succeeded"
 	TaskStatusFailed     TaskStatus = "failed"
 	TaskStatusCancelled  TaskStatus = "cancelled"
+	TaskStatusCancelling TaskStatus = "cancelling"
 	TaskStatusExpired    TaskStatus = "expired"
 )
 
@@ -200,6 +201,8 @@ type Artifact struct {
 
 type Task struct {
 	TaskID         string      `json:"task_id"`
+	LeaseToken     string      `json:"lease_token,omitempty"`
+	TargetAgentID  string      `json:"target_agent_id,omitempty"`
 	CallerID       string      `json:"caller_id,omitempty"`
 	IdempotencyKey string      `json:"idempotency_key,omitempty"`
 	AgentID        string      `json:"agent_id,omitempty"`
@@ -254,8 +257,9 @@ type PullTasksRequest struct {
 
 type TaskResultRequest struct {
 	Envelope
-	AgentID string     `json:"agent_id"`
-	Result  TaskResult `json:"result"`
+	AgentID    string     `json:"agent_id"`
+	LeaseToken string     `json:"lease_token"`
+	Result     TaskResult `json:"result"`
 }
 
 func (a TaskAction) Validate() error {
@@ -276,4 +280,11 @@ func (a TaskAction) Validate() error {
 		return ErrUnsupportedAction
 	}
 	return nil
+}
+
+// TaskLeaseRequest fences every worker mutation to one dispatch attempt.
+type TaskLeaseRequest struct {
+	Envelope
+	AgentID    string `json:"agent_id"`
+	LeaseToken string `json:"lease_token"`
 }

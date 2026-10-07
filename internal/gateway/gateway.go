@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -25,9 +27,12 @@ var (
 
 // Config controls the in-memory gateway state and HTTP server.
 type Config struct {
-	HeartbeatTimeout time.Duration
-	Now              func() time.Time
-	AuditSink        audit.Sink
+	HeartbeatTimeout     time.Duration
+	Now                  func() time.Time
+	AuditSink            audit.Sink
+	TaskPersistencePath  string
+	AgentPersistencePath string
+	AuthToken            string
 }
 
 func (c Config) heartbeatTimeout() time.Duration {
@@ -46,18 +51,27 @@ func (c Config) now() time.Time {
 
 // Store keeps the registered agent identities. It is deliberately in-memory for P1.
 type Store struct {
-	mu               sync.RWMutex
-	agents           map[string]protocol.Agent
-	heartbeatTimeout time.Duration
-	now              func() time.Time
+	mu                 sync.RWMutex
+	agents             map[string]protocol.Agent
+	heartbeatTimeout   time.Duration
+	now                func() time.Time
+	persistencePath    string
+	lastPersistenceErr error
 }
 
 func NewStore(config Config) *Store {
-	return &Store{
+	store := &Store{
 		agents:           make(map[string]protocol.Agent),
 		heartbeatTimeout: config.heartbeatTimeout(),
 		now:              config.now,
+		persistencePath:  config.AgentPersistencePath,
 	}
+	if store.persistencePath != "" {
+		if err := store.load(); err != nil {
+			store.lastPersistenceErr = err
+		}
+	}
+	return store
 }
 
 func (s *Store) currentTime() time.Time {
@@ -107,7 +121,7 @@ func (s *Store) Register(request protocol.RegisterRequest) (protocol.Agent, erro
 	}
 	now := s.currentTime()
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer func() { s.persistLocked(); s.mu.Unlock() }()
 	if existing, ok := s.agents[request.AgentID]; ok {
 		if existing.RevokedAt != nil {
 			return protocol.Agent{}, ErrRevoked
@@ -148,7 +162,7 @@ func cloneCapabilities(input []protocol.Capability) []protocol.Capability {
 func (s *Store) Heartbeat(agentID string, request protocol.HeartbeatRequest) (protocol.Agent, error) {
 	now := s.currentTime()
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer func() { s.persistLocked(); s.mu.Unlock() }()
 	agent, ok := s.agents[agentID]
 	if !ok {
 		return protocol.Agent{}, ErrNotFound
@@ -172,8 +186,8 @@ func (s *Store) Heartbeat(agentID string, request protocol.HeartbeatRequest) (pr
 
 func (s *Store) Get(agentID string) (protocol.Agent, error) {
 	now := s.currentTime()
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	agent, ok := s.agents[agentID]
 	if !ok {
 		return protocol.Agent{}, ErrNotFound
@@ -183,8 +197,8 @@ func (s *Store) Get(agentID string) (protocol.Agent, error) {
 
 func (s *Store) List() []protocol.Agent {
 	now := s.currentTime()
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	output := make([]protocol.Agent, 0, len(s.agents))
 	for _, agent := range s.agents {
 		output = append(output, s.status(agent, now))
@@ -193,10 +207,67 @@ func (s *Store) List() []protocol.Agent {
 	return output
 }
 
+type agentSnapshot struct {
+	Agents map[string]protocol.Agent `json:"agents"`
+}
+
+func (s *Store) load() error {
+	data, err := os.ReadFile(s.persistencePath)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var snapshot agentSnapshot
+	if err := json.Unmarshal(data, &snapshot); err != nil {
+		return err
+	}
+	if snapshot.Agents != nil {
+		s.agents = snapshot.Agents
+	}
+	return nil
+}
+
+func (s *Store) persistLocked() {
+	if s.persistencePath == "" {
+		return
+	}
+	data, err := json.Marshal(agentSnapshot{Agents: s.agents})
+	if err == nil {
+		dir := filepath.Dir(s.persistencePath)
+		if err = os.MkdirAll(dir, 0o700); err == nil {
+			file, createErr := os.CreateTemp(dir, "agents-*.tmp")
+			if createErr != nil {
+				err = createErr
+			} else {
+				name := file.Name()
+				defer os.Remove(name)
+				if _, err = file.Write(data); err == nil {
+					err = file.Chmod(0o600)
+				}
+				if closeErr := file.Close(); err == nil {
+					err = closeErr
+				}
+				if err == nil {
+					err = os.Rename(name, s.persistencePath)
+				}
+			}
+		}
+	}
+	s.lastPersistenceErr = err
+}
+
+func (s *Store) PersistenceError() error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.lastPersistenceErr
+}
+
 func (s *Store) Revoke(agentID string) (protocol.Agent, error) {
 	now := s.currentTime()
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer func() { s.persistLocked(); s.mu.Unlock() }()
 	agent, ok := s.agents[agentID]
 	if !ok {
 		return protocol.Agent{}, ErrNotFound
@@ -212,7 +283,7 @@ func (s *Store) Revoke(agentID string) (protocol.Agent, error) {
 // Offline records a clean Agent shutdown while keeping its identity registered.
 func (s *Store) Offline(agentID string) (protocol.Agent, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer func() { s.persistLocked(); s.mu.Unlock() }()
 	agent, ok := s.agents[agentID]
 	if !ok {
 		return protocol.Agent{}, ErrNotFound
@@ -230,11 +301,12 @@ type Server struct {
 	store     *Store
 	tasks     *TaskStore
 	auditSink audit.Sink
+	authToken string
 	requests  atomic.Uint64
 }
 
 func NewServer(config Config) *Server {
-	return &Server{store: NewStore(config), tasks: NewTaskStore(TaskConfig{Now: config.Now}), auditSink: config.AuditSink}
+	return &Server{store: NewStore(config), tasks: NewTaskStore(TaskConfig{Now: config.Now, PersistencePath: config.TaskPersistencePath}), auditSink: config.AuditSink, authToken: config.AuthToken}
 }
 
 func (s *Server) Store() *Store { return s.store }
@@ -251,6 +323,10 @@ func (s *Server) recordAudit(kind, actor, resource, outcome string, details map[
 
 func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	s.requests.Add(1)
+	if s.authToken != "" && strings.HasPrefix(request.URL.Path, "/api/") && request.Header.Get("Authorization") != "Bearer "+s.authToken {
+		writeError(writer, request, http.StatusUnauthorized, protocol.ErrorUnauthorized, "authorization required", false)
+		return
+	}
 	if request.URL.Path == "/metrics" {
 		if request.Method != http.MethodGet {
 			writeError(writer, request, http.StatusMethodNotAllowed, protocol.ErrorInvalidRequest, "method not allowed", false)
@@ -271,7 +347,11 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 				online++
 			}
 		}
-		health := map[string]any{"protocol_version": protocol.Version, "request_id": responseEnvelope(request).RequestID, "timestamp": time.Now().UTC(), "status": "ok", "service": "gateway", "agents": len(agents), "agents_online": online, "tasks": len(s.tasks.List())}
+		status := "ok"
+		if s.store.PersistenceError() != nil || s.tasks.PersistenceError() != nil {
+			status = "degraded"
+		}
+		health := map[string]any{"protocol_version": protocol.Version, "request_id": responseEnvelope(request).RequestID, "timestamp": time.Now().UTC(), "status": status, "service": "gateway", "agents": len(agents), "agents_online": online, "tasks": len(s.tasks.List())}
 		writeJSON(writer, http.StatusOK, health)
 		return
 	}
@@ -318,6 +398,16 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		}
 		if len(parts) == 2 && parts[0] != "" {
 			switch parts[1] {
+			case "renew":
+				if request.Method == http.MethodPost {
+					s.handleRenewTask(writer, request, parts[0])
+					return
+				}
+			case "cancel":
+				if request.Method == http.MethodPost {
+					s.handleCancelTask(writer, request, parts[0])
+					return
+				}
 			case "ack":
 				if request.Method == http.MethodPost {
 					s.handleAckTask(writer, request, parts[0])

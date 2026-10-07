@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -35,5 +37,23 @@ func TestExecutorFileSandboxAndHash(t *testing.T) {
 	escape := executor.Execute(context.Background(), protocol.Task{Action: protocol.TaskAction{Type: protocol.ActionFileRead, File: &protocol.FileAction{Path: "../outside"}}})
 	if escape.Status != protocol.TaskStatusFailed || !strings.Contains(escape.ErrorMessage, "outside") {
 		t.Fatalf("escape result=%+v", escape)
+	}
+	outside := t.TempDir()
+	link := filepath.Join(workspace, "link")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	linked := executor.Execute(context.Background(), protocol.Task{Action: protocol.TaskAction{Type: protocol.ActionFileWrite, File: &protocol.FileAction{Path: "link/escape.txt", Content: []byte("escape"), Overwrite: true}}})
+	if linked.Status != protocol.TaskStatusFailed || !strings.Contains(linked.ErrorMessage, "outside") {
+		t.Fatalf("symlink escape result=%+v", linked)
+	}
+}
+
+func TestExecutorScreenshotRequiresDisplay(t *testing.T) {
+	t.Setenv("DISPLAY", "")
+	t.Setenv("WAYLAND_DISPLAY", "")
+	result := (Executor{Workspace: t.TempDir(), ScreenshotCommand: "true"}).Execute(context.Background(), protocol.Task{Action: protocol.TaskAction{Type: protocol.ActionDesktopScreenshot, Screenshot: &protocol.ScreenshotAction{OutputPath: "capture.png"}}})
+	if result.Status != protocol.TaskStatusFailed || result.ErrorCode != "no_display" {
+		t.Fatalf("screenshot result=%+v", result)
 	}
 }

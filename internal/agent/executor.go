@@ -167,6 +167,9 @@ func (e Executor) executeFileWrite(action *protocol.FileAction) protocol.TaskRes
 }
 
 func (e Executor) executeScreenshot(ctx context.Context, action *protocol.ScreenshotAction) protocol.TaskResult {
+	if strings.TrimSpace(os.Getenv("DISPLAY")) == "" && strings.TrimSpace(os.Getenv("WAYLAND_DISPLAY")) == "" {
+		return failedResult("no_display", errors.New("no graphical display session is available"))
+	}
 	commandName := e.ScreenshotCommand
 	if commandName == "" {
 		commandName = "gnome-screenshot"
@@ -215,6 +218,10 @@ func (e Executor) safePath(input string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	root, err = filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", err
+	}
 	path := input
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(root, path)
@@ -223,7 +230,33 @@ func (e Executor) safePath(input string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	rel, err := filepath.Rel(root, path)
+	// Resolve the existing target, or the nearest existing parent for a new
+	// file. This prevents a symlink inside the workspace from escaping it.
+	resolved, resolveErr := filepath.EvalSymlinks(path)
+	if resolveErr != nil {
+		if !errors.Is(resolveErr, os.ErrNotExist) {
+			return "", resolveErr
+		}
+		probe := filepath.Dir(path)
+		suffix := []string{filepath.Base(path)}
+		for {
+			parent, parentErr := filepath.EvalSymlinks(probe)
+			if parentErr == nil {
+				for i := len(suffix) - 1; i >= 0; i-- {
+					parent = filepath.Join(parent, suffix[i])
+				}
+				resolved = parent
+				break
+			}
+			next := filepath.Dir(probe)
+			if next == probe {
+				return "", parentErr
+			}
+			suffix = append(suffix, filepath.Base(probe))
+			probe = next
+		}
+	}
+	rel, err := filepath.Rel(root, resolved)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 		return "", errors.New("path is outside executor workspace")
 	}

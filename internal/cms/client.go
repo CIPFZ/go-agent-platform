@@ -18,6 +18,7 @@ import (
 type Client struct {
 	BaseURL    string
 	HTTPClient *http.Client
+	AuthToken  string
 }
 
 func (c Client) CreateTask(ctx context.Context, request protocol.CreateTaskRequest) (protocol.Task, error) {
@@ -63,6 +64,9 @@ func (c Client) do(ctx context.Context, method, path string, body any, result an
 		return err
 	}
 	request.Header.Set("Content-Type", "application/json")
+	if c.AuthToken != "" {
+		request.Header.Set("Authorization", "Bearer "+c.AuthToken)
+	}
 	client := c.HTTPClient
 	if client == nil {
 		client = &http.Client{Timeout: 10 * time.Second}

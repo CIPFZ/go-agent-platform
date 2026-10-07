@@ -123,3 +123,66 @@ func TestRunnerPullsAndExecutesTask(t *testing.T) {
 		t.Fatal("runner did not stop after task")
 	}
 }
+
+type cancellationExecutor struct {
+	started chan struct{}
+}
+
+func (e cancellationExecutor) Execute(ctx context.Context, _ protocol.Task) protocol.TaskResult {
+	close(e.started)
+	<-ctx.Done()
+	return protocol.TaskResult{Status: protocol.TaskStatusCancelled, ErrorCode: "cancelled"}
+}
+
+func TestRunnerCancelsRunningTaskAndReleasesWorker(t *testing.T) {
+	gatewayServer := gateway.NewServer(gateway.Config{HeartbeatTimeout: time.Second})
+	server := httptest.NewServer(gatewayServer.Handler())
+	defer server.Close()
+	client, err := NewClient(Config{GatewayURL: server.URL, AgentID: "agent-cancel", AgentVersion: "test", HeartbeatInterval: 5 * time.Millisecond, RequestTimeout: time.Second})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	task, err := gatewayServer.Tasks().Create(protocol.CreateTaskRequest{
+		CallerID: "test", IdempotencyKey: "cancel-1", AgentID: "agent-cancel",
+		Action: protocol.TaskAction{Type: protocol.ActionCommandExec, Command: &protocol.CommandAction{Argv: []string{"printf", "ignored"}}},
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	executor := cancellationExecutor{started: make(chan struct{})}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- (&Runner{Client: client, HeartbeatInterval: 5 * time.Millisecond, TaskPollInterval: 5 * time.Millisecond, LeaseSeconds: 1, Executor: executor}).Run(ctx)
+	}()
+	select {
+	case <-executor.started:
+	case <-time.After(2 * time.Second):
+		cancel()
+		t.Fatal("executor did not start")
+	}
+	if _, err := gatewayServer.Tasks().Cancel(task.TaskID); err != nil {
+		t.Fatalf("cancel task: %v", err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		current, getErr := gatewayServer.Tasks().Get(task.TaskID)
+		if getErr == nil && current.Status == protocol.TaskStatusCancelled {
+			break
+		}
+		if time.Now().After(deadline) {
+			cancel()
+			t.Fatalf("task did not cancel: task=%+v err=%v", current, getErr)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	select {
+	case runErr := <-done:
+		if !errors.Is(runErr, context.Canceled) {
+			t.Fatalf("runner error = %v, want context cancellation", runErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("runner did not stop after cancellation")
+	}
+}

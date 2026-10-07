@@ -20,6 +20,7 @@ func main() {
 	agentVersion := flag.String("agent-version", "dev", "guest-agent version")
 	interval := flag.Duration("heartbeat-interval", 15*time.Second, "heartbeat interval")
 	workspace := flag.String("workspace", "/var/lib/guest-agent/workspace", "sandbox workspace for task execution")
+	authToken := flag.String("auth-token", "", "Bearer token for Gateway API")
 	flag.Parse()
 	if strings.TrimSpace(*agentID) == "" {
 		if strings.TrimSpace(*stateFile) != "" {
@@ -43,6 +44,7 @@ func main() {
 		AgentVersion:      *agentVersion,
 		Hostname:          hostname,
 		HeartbeatInterval: *interval,
+		AuthToken:         *authToken,
 	})
 	if err != nil {
 		log.Fatal(err)
