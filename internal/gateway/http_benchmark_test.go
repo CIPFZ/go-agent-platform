@@ -34,8 +34,17 @@ func BenchmarkHTTPHealthz(b *testing.B) {
 }
 
 func BenchmarkHTTPTaskCreate(b *testing.B) {
-	server := httptest.NewServer(NewServer(Config{}).Handler())
+	gateway := NewServer(Config{})
+	server := httptest.NewServer(gateway.Handler())
 	defer server.Close()
+	// This benchmark measures HTTP/task creation cost. Deliberately size the
+	// in-memory queue for the benchmark's requested iteration count so the
+	// production default queue limit is not mistaken for an HTTP failure.
+	gateway.tasks.mu.Lock()
+	gateway.tasks.maxQueueSize = b.N + 1
+	gateway.tasks.maxCallerQueue = b.N + 1
+	gateway.tasks.maxAgentQueue = b.N + 1
+	gateway.tasks.mu.Unlock()
 	client := server.Client()
 	var sequence atomic.Uint64
 	b.RunParallel(func(pb *testing.PB) {
