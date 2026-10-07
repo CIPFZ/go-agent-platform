@@ -4,7 +4,7 @@ set -eu
 # Collect repeatable HTTP benchmark and process-resource samples on Linux.
 # Override DURATIONS with a comma-separated list of benchmark seconds.
 OUT=${1:-resource-curve.csv}
-DURATIONS=${DURATIONS:-5,30,60}
+DURATIONS=${DURATIONS:-1,2,5}
 TIME_BIN=${TIME_BIN:-/usr/bin/time}
 
 case "$OUT" in
