@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/CIPFZ/go-agent-platform/internal/audit"
+	"github.com/CIPFZ/go-agent-platform/internal/credentials"
 	"github.com/CIPFZ/go-agent-platform/internal/protocol"
 )
 
@@ -325,9 +327,16 @@ func (s *Server) recordAudit(kind, actor, resource, outcome string, details map[
 
 func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	s.requests.Add(1)
-	if expected := s.configuredAuthToken(); expected != "" && strings.HasPrefix(request.URL.Path, "/api/") && request.Header.Get("Authorization") != "Bearer "+expected {
-		writeError(writer, request, http.StatusUnauthorized, protocol.ErrorUnauthorized, "authorization required", false)
-		return
+	if strings.HasPrefix(request.URL.Path, "/api/") {
+		expected, err := s.configuredAuthToken()
+		if err != nil {
+			writeError(writer, request, http.StatusServiceUnavailable, protocol.ErrorInternal, "authentication credential unavailable", true)
+			return
+		}
+		if expected != "" && subtle.ConstantTimeCompare([]byte(request.Header.Get("Authorization")), []byte("Bearer "+expected)) != 1 {
+			writeError(writer, request, http.StatusUnauthorized, protocol.ErrorUnauthorized, "authorization required", false)
+			return
+		}
 	}
 	if request.URL.Path == "/metrics" {
 		if request.Method != http.MethodGet {
@@ -350,11 +359,15 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 			}
 		}
 		status := "ok"
-		if s.store.PersistenceError() != nil || s.tasks.PersistenceError() != nil {
+		statusCode := http.StatusOK
+		_, authErr := s.configuredAuthToken()
+		tasks := s.tasks.List()
+		if authErr != nil || s.store.PersistenceError() != nil || s.tasks.PersistenceError() != nil {
 			status = "degraded"
+			statusCode = http.StatusServiceUnavailable
 		}
-		health := map[string]any{"protocol_version": protocol.Version, "request_id": responseEnvelope(request).RequestID, "timestamp": time.Now().UTC(), "status": status, "service": "gateway", "agents": len(agents), "agents_online": online, "tasks": len(s.tasks.List())}
-		writeJSON(writer, http.StatusOK, health)
+		health := map[string]any{"protocol_version": protocol.Version, "request_id": responseEnvelope(request).RequestID, "timestamp": time.Now().UTC(), "status": status, "service": "gateway", "agents": len(agents), "agents_online": online, "tasks": len(tasks)}
+		writeJSON(writer, statusCode, health)
 		return
 	}
 	if request.URL.Path == "/api/v1/agents" {
@@ -476,15 +489,8 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	}
 }
 
-func (s *Server) configuredAuthToken() string {
-	if s.authTokenFile != "" {
-		data, err := os.ReadFile(s.authTokenFile)
-		if err != nil {
-			return ""
-		}
-		return strings.TrimSpace(string(data))
-	}
-	return s.authToken
+func (s *Server) configuredAuthToken() (string, error) {
+	return credentials.Resolve(s.authToken, s.authTokenFile)
 }
 
 func (s *Server) handleRegister(writer http.ResponseWriter, request *http.Request) {

@@ -11,10 +11,10 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
+	"github.com/CIPFZ/go-agent-platform/internal/credentials"
 	"github.com/CIPFZ/go-agent-platform/internal/protocol"
 )
 
@@ -172,7 +172,11 @@ func (c *Client) doJSON(ctx context.Context, method, path string, requestBody an
 		return fmt.Errorf("create request: %w", err)
 	}
 	request.Header.Set("Content-Type", "application/json")
-	if token := c.authToken(); token != "" {
+	token, err := c.authToken()
+	if err != nil {
+		return err
+	}
+	if token != "" {
 		request.Header.Set("Authorization", "Bearer "+token)
 	}
 	response, err := c.httpClient.Do(request)
@@ -196,15 +200,8 @@ func (c *Client) doJSON(ctx context.Context, method, path string, requestBody an
 	return nil
 }
 
-func (c *Client) authToken() string {
-	if c.config.AuthTokenFile != "" {
-		data, err := os.ReadFile(c.config.AuthTokenFile)
-		if err != nil {
-			return ""
-		}
-		return strings.TrimSpace(string(data))
-	}
-	return c.config.AuthToken
+func (c *Client) authToken() (string, error) {
+	return credentials.Resolve(c.config.AuthToken, c.config.AuthTokenFile)
 }
 
 var errNoContent = errors.New("gateway returned no content")
@@ -247,6 +244,9 @@ func (e *HTTPError) Error() string {
 	return fmt.Sprintf("gateway HTTP %d: %s", e.StatusCode, e.APIError.Message)
 }
 func temporary(err error) bool {
+	if errors.Is(err, credentials.ErrUnavailable) {
+		return true
+	}
 	var h *HTTPError
 	if errors.As(err, &h) {
 		return h.StatusCode == 429 || h.StatusCode >= 500
