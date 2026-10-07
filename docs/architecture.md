@@ -1,21 +1,47 @@
-# Architecture
+# 系统架构
 
 ```text
-GoWebFrame CMS  -- VM lifecycle -->  Ubuntu / QEMU VM
-                                      |
-                                      | outbound HTTP/HTTPS
-                                      v
-                              Agent Gateway
+                         控制面                         数据面
+
+GoWebFrame CMS  -- VM 生命周期 -->  Ubuntu / QEMU VM
+       |                              |
+       | 绑定 VM 与 Agent              | 出站 HTTP/HTTPS
+       v                              v
+  Agent Gateway  <------ 任务与结果 ------  guest-agent
+       |
+       +-- 任务队列 / 幂等 / 审计 / 结果与制品索引
 ```
 
-## Boundary
+## 职责边界
 
-The CMS creates, starts, stops, edits and deletes virtual machines. The gateway does not own VM lifecycle. A guest agent runs inside each VM and maintains an outbound, authenticated connection to the gateway. This keeps the guest network surface small and makes the transport consistent across hosts.
+### GoWebFrame CMS
 
-## Initial service split
+CMS 负责虚拟机资源本身：创建、启动、停止、编辑、删除、存储和网络配置。它可以保存某台虚拟机对应的 Agent 标识和能力摘要，也可以调用 Gateway 的任务接口，但不把 Agent 的执行逻辑嵌入 CMS。
 
-1. `gateway`: registration, heartbeat, task routing, queueing, result storage and audit events.
-2. `guest-agent`: capability probe, bounded worker pool, command/screenshot/file handlers and local policy checks.
-3. `protocol`: versioned request and result envelopes shared by both binaries.
+### Agent Gateway
 
-The first protocol version will use ordinary HTTP requests with long polling. Streaming and HTTP/2 can be added without changing the task model.
+Gateway 是独立服务，负责 Agent 注册、心跳、在线状态、任务排队、任务路由、幂等、结果索引、制品元数据和审计。Gateway 不直接登录虚拟机，也不负责创建或删除虚拟机。
+
+### guest-agent
+
+guest-agent 安装在虚拟机镜像内，以系统服务运行。它主动向 Gateway 建立出站连接，汇报能力并拉取任务，在本机执行经过策略检查的动作，再上传结果或制品。虚拟机无需开放入站 SSH 或 Agent 端口。
+
+## 连接模型
+
+第一版使用普通 HTTP/HTTPS 请求和长轮询：Agent 注册后维持心跳，并通过拉取接口取得任务；任务结果和日志通过结果接口回传。这个模型容易部署、便于穿过 NAT，也与 CMS 的 HTTP API 保持一致。
+
+后续可以在不改变任务模型的前提下增加 HTTP/2、Server-Sent Events 或 WebSocket。连接升级只改变传输层，不改变任务 ID、状态、幂等键和结果结构。
+
+## 初始服务拆分
+
+1. `gateway`：注册、心跳、任务路由、队列、结果存储和审计事件。
+2. `guest-agent`：能力探测、有界 Worker 池、命令/截图/文件处理器和本地策略检查。
+3. `internal/protocol`：双方共用的版本化 HTTP 数据模型。
+
+## 关键原则
+
+- 任务是唯一的执行单位，所有动作都有任务 ID 和明确状态。
+- 网关和 Agent 都有并发上限与队列上限，不能因为一个客户端把整台主机拖垮。
+- 每个任务都必须有超时、输出上限和取消语义；网络断开不能让任务无限运行。
+- 需要返回文件、截图或日志时，结果中只保存制品引用和摘要，避免把大内容塞进控制接口。
+- 高风险动作先经过策略判断；策略拒绝、需要确认和执行失败要能区分。

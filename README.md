@@ -14,12 +14,21 @@
 - `cmd/gateway`：中心网关服务。
 - `cmd/guest-agent`：安装在虚拟机内的轻量 Agent。
 - `internal/protocol`：网关和 Agent 共用的 HTTP 数据模型与版本约束。
-- `docs`：架构、部署和安全边界说明。
+- `docs`：项目背景、架构、协议、安全边界、路线图和开发约定。
 - `deploy`：服务化和镜像部署样例。
 
 ## 当前状态
 
 当前提交建立项目边界和最小可运行入口。后续按以下顺序实现：注册与心跳、任务队列和幂等、命令执行、截图、文件操作、策略与审计、CMS 对接。
+
+## 文档入口
+
+- [项目背景与决策](docs/project-context.md)
+- [系统架构](docs/architecture.md)
+- [协议与任务模型](docs/protocol.md)
+- [安全与运行边界](docs/security.md)
+- [开发与协作约定](docs/development.md)
+- [实施路线图](docs/roadmap.md)
 
 ## 本地运行
 
