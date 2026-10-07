@@ -11,6 +11,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -36,6 +37,7 @@ type Config struct {
 	RequestTimeout    time.Duration
 	HTTPClient        *http.Client
 	AuthToken         string
+	AuthTokenFile     string
 	Now               func() time.Time
 }
 
@@ -170,8 +172,8 @@ func (c *Client) doJSON(ctx context.Context, method, path string, requestBody an
 		return fmt.Errorf("create request: %w", err)
 	}
 	request.Header.Set("Content-Type", "application/json")
-	if c.config.AuthToken != "" {
-		request.Header.Set("Authorization", "Bearer "+c.config.AuthToken)
+	if token := c.authToken(); token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
 	}
 	response, err := c.httpClient.Do(request)
 	if err != nil {
@@ -192,6 +194,17 @@ func (c *Client) doJSON(ctx context.Context, method, path string, requestBody an
 		return fmt.Errorf("decode gateway response: %w", err)
 	}
 	return nil
+}
+
+func (c *Client) authToken() string {
+	if c.config.AuthTokenFile != "" {
+		data, err := os.ReadFile(c.config.AuthTokenFile)
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(data))
+	}
+	return c.config.AuthToken
 }
 
 var errNoContent = errors.New("gateway returned no content")

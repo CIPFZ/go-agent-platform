@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -155,6 +156,38 @@ func TestHTTPAuthTokenProtectsAPI(t *testing.T) {
 	h.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("valid auth status=%d", recorder.Code)
+	}
+}
+
+func TestHTTPAuthTokenFileRotatesWithoutRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gateway.token")
+	if err := os.WriteFile(path, []byte("first\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h := NewServer(Config{AuthTokenFile: path}).Handler()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/agents", nil)
+	request.Header.Set("Authorization", "Bearer first")
+	recorder := httptest.NewRecorder()
+	h.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("initial file token status=%d", recorder.Code)
+	}
+	if err := os.WriteFile(path, []byte("second\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	request = httptest.NewRequest(http.MethodGet, "/api/v1/agents", nil)
+	request.Header.Set("Authorization", "Bearer first")
+	recorder = httptest.NewRecorder()
+	h.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("old file token status=%d", recorder.Code)
+	}
+	request = httptest.NewRequest(http.MethodGet, "/api/v1/agents", nil)
+	request.Header.Set("Authorization", "Bearer second")
+	recorder = httptest.NewRecorder()
+	h.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("rotated file token status=%d", recorder.Code)
 	}
 }
 

@@ -33,6 +33,7 @@ type Config struct {
 	TaskPersistencePath  string
 	AgentPersistencePath string
 	AuthToken            string
+	AuthTokenFile        string
 }
 
 func (c Config) heartbeatTimeout() time.Duration {
@@ -298,15 +299,16 @@ func (s *Store) Offline(agentID string) (protocol.Agent, error) {
 
 // Server implements the versioned Gateway HTTP API.
 type Server struct {
-	store     *Store
-	tasks     *TaskStore
-	auditSink audit.Sink
-	authToken string
-	requests  atomic.Uint64
+	store         *Store
+	tasks         *TaskStore
+	auditSink     audit.Sink
+	authToken     string
+	authTokenFile string
+	requests      atomic.Uint64
 }
 
 func NewServer(config Config) *Server {
-	return &Server{store: NewStore(config), tasks: NewTaskStore(TaskConfig{Now: config.Now, PersistencePath: config.TaskPersistencePath}), auditSink: config.AuditSink, authToken: config.AuthToken}
+	return &Server{store: NewStore(config), tasks: NewTaskStore(TaskConfig{Now: config.Now, PersistencePath: config.TaskPersistencePath}), auditSink: config.AuditSink, authToken: config.AuthToken, authTokenFile: config.AuthTokenFile}
 }
 
 func (s *Server) Store() *Store { return s.store }
@@ -323,7 +325,7 @@ func (s *Server) recordAudit(kind, actor, resource, outcome string, details map[
 
 func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	s.requests.Add(1)
-	if s.authToken != "" && strings.HasPrefix(request.URL.Path, "/api/") && request.Header.Get("Authorization") != "Bearer "+s.authToken {
+	if expected := s.configuredAuthToken(); expected != "" && strings.HasPrefix(request.URL.Path, "/api/") && request.Header.Get("Authorization") != "Bearer "+expected {
 		writeError(writer, request, http.StatusUnauthorized, protocol.ErrorUnauthorized, "authorization required", false)
 		return
 	}
@@ -472,6 +474,17 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	default:
 		writeError(writer, request, http.StatusNotFound, protocol.ErrorNotFound, "endpoint not found", false)
 	}
+}
+
+func (s *Server) configuredAuthToken() string {
+	if s.authTokenFile != "" {
+		data, err := os.ReadFile(s.authTokenFile)
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(data))
+	}
+	return s.authToken
 }
 
 func (s *Server) handleRegister(writer http.ResponseWriter, request *http.Request) {

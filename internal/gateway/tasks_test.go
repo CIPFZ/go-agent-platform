@@ -114,3 +114,31 @@ func TestTaskStorePersistsAcrossRestart(t *testing.T) {
 		t.Fatalf("idempotency after restart=%+v err=%v", again, err)
 	}
 }
+
+func TestTaskStorePurgesExpiredInlineArtifacts(t *testing.T) {
+	clock := &testClock{now: time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)}
+	store := NewTaskStore(TaskConfig{Now: clock.Now})
+	task, err := store.Create(protocol.CreateTaskRequest{CallerID: "cms", Action: protocol.TaskAction{Type: protocol.ActionCommandExec, Command: &protocol.CommandAction{Argv: []string{"true"}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err = store.Pull("agent", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.Ack(task.TaskID, "agent", task.LeaseToken); err != nil {
+		t.Fatal(err)
+	}
+	expires := clock.now.Add(time.Hour)
+	if _, err = store.Result(task.TaskID, "agent", task.LeaseToken, protocol.TaskResult{Status: protocol.TaskStatusSucceeded, Artifacts: []protocol.Artifact{{ArtifactID: "a1", DataBase64: "YWJj", SHA256: "hash", ExpiresAt: expires}}}); err != nil {
+		t.Fatal(err)
+	}
+	clock.now = expires.Add(time.Second)
+	loaded, err := store.Get(task.TaskID)
+	if err != nil || loaded.Result == nil || len(loaded.Result.Artifacts) != 1 {
+		t.Fatalf("loaded=%+v err=%v", loaded, err)
+	}
+	if loaded.Result.Artifacts[0].DataBase64 != "" || loaded.Result.Artifacts[0].SHA256 != "hash" {
+		t.Fatalf("expired payload was not purged: %+v", loaded.Result.Artifacts[0])
+	}
+}

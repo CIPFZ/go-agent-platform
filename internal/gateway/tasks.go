@@ -317,6 +317,7 @@ func terminal(status protocol.TaskStatus) bool {
 	return false
 }
 func (s *TaskStore) expireLocked(now time.Time) {
+	s.purgeExpiredArtifactsLocked(now)
 	for id, task := range s.tasks {
 		if terminal(task.Status) || task.Status == protocol.TaskStatusQueued {
 			continue
@@ -338,6 +339,30 @@ func (s *TaskStore) expireLocked(now time.Time) {
 		}
 		task.LeaseExpiresAt = nil
 		s.tasks[id] = task
+	}
+}
+
+// purgeExpiredArtifactsLocked removes only inline bytes after their expiry;
+// identity, size and hash remain available for audit and downstream storage.
+func (s *TaskStore) purgeExpiredArtifactsLocked(now time.Time) {
+	for id, task := range s.tasks {
+		if task.Result == nil {
+			continue
+		}
+		result := *task.Result
+		result.Artifacts = append([]protocol.Artifact(nil), result.Artifacts...)
+		changed := false
+		for i := range result.Artifacts {
+			artifact := &result.Artifacts[i]
+			if artifact.DataBase64 != "" && !artifact.ExpiresAt.IsZero() && !now.Before(artifact.ExpiresAt) {
+				artifact.DataBase64 = ""
+				changed = true
+			}
+		}
+		if changed {
+			task.Result = &result
+			s.tasks[id] = task
+		}
 	}
 }
 func cloneTask(task protocol.Task) protocol.Task {

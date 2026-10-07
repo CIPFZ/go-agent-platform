@@ -23,6 +23,7 @@ func main() {
 	interval := flag.Duration("heartbeat-interval", 15*time.Second, "heartbeat interval")
 	workspace := flag.String("workspace", "/var/lib/guest-agent/workspace", "sandbox workspace for task execution")
 	authToken := flag.String("auth-token", "", "Bearer token for Gateway API")
+	authTokenFile := flag.String("auth-token-file", "", "file containing the current Gateway Bearer token")
 	flag.Parse()
 	if strings.TrimSpace(*agentID) == "" {
 		if strings.TrimSpace(*stateFile) != "" {
@@ -47,6 +48,7 @@ func main() {
 		Hostname:          hostname,
 		HeartbeatInterval: *interval,
 		AuthToken:         *authToken,
+		AuthTokenFile:     *authTokenFile,
 		Capabilities:      detectCapabilities(),
 	})
 	if err != nil {

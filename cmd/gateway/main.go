@@ -20,6 +20,7 @@ func main() {
 	agentDataFile := flag.String("agent-store", "", "durable agent registry JSON path")
 	auditFile := flag.String("audit-log", "", "append-only audit JSONL path")
 	authToken := flag.String("auth-token", "", "Bearer token required by API clients")
+	authTokenFile := flag.String("auth-token-file", "", "file containing the current Bearer token; reread per request")
 	tlsCert := flag.String("tls-cert", "", "PEM certificate path; enables HTTPS with tls-key")
 	tlsKey := flag.String("tls-key", "", "PEM private key path; enables HTTPS with tls-cert")
 	flag.Parse()
@@ -37,7 +38,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:              *addr,
-		Handler:           gateway.NewServer(gateway.Config{TaskPersistencePath: *dataFile, AgentPersistencePath: *agentDataFile, AuditSink: auditSink, AuthToken: *authToken}).Handler(),
+		Handler:           gateway.NewServer(gateway.Config{TaskPersistencePath: *dataFile, AgentPersistencePath: *agentDataFile, AuditSink: auditSink, AuthToken: *authToken, AuthTokenFile: *authTokenFile}).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
