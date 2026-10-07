@@ -16,7 +16,24 @@
 | 查询任务 | CMS/调用方 -> Gateway | 查询状态、日志摘要和错误原因 |
 | 取消任务 | CMS/调用方 -> Gateway | 请求停止尚未开始或正在运行的任务 |
 
-实际路径和字段在实现第一版协议时再固定；文档中的分组先作为边界，不把尚未实现的接口伪装成现有能力。
+当前版本固定为 `/api/v1`，所有 JSON 请求使用 `protocol_version`、`request_id` 和 UTC `timestamp`。
+
+| 方法 | 路径 | 作用 |
+| --- | --- | --- |
+| `GET` | `/healthz` | Gateway 健康状态和在线 Agent/任务计数 |
+| `GET` | `/metrics` | Prometheus 文本格式的基础计数 |
+| `POST` | `/api/v1/agents/register` | 注册或更新 Agent 能力摘要 |
+| `POST` | `/api/v1/agents/{agent_id}/heartbeat` | 更新心跳、版本、能力和资源 |
+| `POST` | `/api/v1/agents/{agent_id}/offline` | 优雅退出并保持身份注册 |
+| `GET` | `/api/v1/agents/{agent_id}` | 查询在线、离线或撤销状态 |
+| `POST` | `/api/v1/tasks` | 创建任务，支持 `caller_id` + `idempotency_key` |
+| `GET` | `/api/v1/tasks/{task_id}` | 查询任务和结果 |
+| `POST` | `/api/v1/tasks/{task_id}` | 取消尚未完成的任务 |
+| `POST` | `/api/v1/agents/{agent_id}/tasks/pull` | Agent 获取一个租约任务 |
+| `POST` | `/api/v1/tasks/{task_id}/ack` | Agent 确认并进入 `running` |
+| `POST` | `/api/v1/tasks/{task_id}/result` | Agent 提交成功或失败结果 |
+
+任务状态由 Gateway 维护：`queued -> dispatched -> running -> succeeded/failed`，取消进入 `cancelled`，租约耗尽进入 `expired`。失败任务在达到 `max_attempts` 前会重新排队。
 
 ## 任务状态
 
