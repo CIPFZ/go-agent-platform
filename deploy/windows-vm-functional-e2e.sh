@@ -129,7 +129,10 @@ assert_value '.status' failed
 assert_value '.result.error_code' policy_denied
 screenshot=$(jq -cn '{type:"desktop.screenshot",screenshot:{output_path:"screen.png"}}')
 id=$(run_task "$(payload "$screenshot" win-screenshot)")
-assert_value '.status' failed
-assert_value '.result.error_code' no_display
+assert_value '.status' succeeded
+assert_value '.result.artifacts[0].media_type' image/png
+artifact=$(jq -r '.task.result.artifacts[0].artifact_id' "$WORK/task.json")
+curl -fsS --max-time "$CURL_TIMEOUT" "${AUTH[@]}" "$GATEWAY_URL/api/v1/tasks/$id/artifacts/$artifact" -o "$WORK/screen.png"
+file "$WORK/screen.png" | grep -q 'PNG image data'
 
 printf 'Windows VM functional E2E passed for agent %s\n' "$AGENT_ID"

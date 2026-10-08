@@ -219,12 +219,8 @@ func writeFileAtomic(path string, content []byte, overwrite bool) error {
 }
 
 func (e Executor) executeScreenshot(ctx context.Context, action *protocol.ScreenshotAction) protocol.TaskResult {
-	if strings.TrimSpace(os.Getenv("DISPLAY")) == "" && strings.TrimSpace(os.Getenv("WAYLAND_DISPLAY")) == "" {
+	if !desktopSessionAvailable() {
 		return failedResult("no_display", errors.New("no graphical display session is available"))
-	}
-	commandName := e.ScreenshotCommand
-	if commandName == "" {
-		commandName = "gnome-screenshot"
 	}
 	path, err := e.safePath(action.OutputPath)
 	if err != nil {
@@ -233,7 +229,7 @@ func (e Executor) executeScreenshot(ctx context.Context, action *protocol.Screen
 	if action.OutputPath == "" {
 		return failedResult("invalid_path", errors.New("screenshot output_path is required"))
 	}
-	if err := exec.CommandContext(ctx, commandName, "-f", path).Run(); err != nil {
+	if err := captureDesktopScreenshot(ctx, path, e.ScreenshotCommand); err != nil {
 		return failedResult("screenshot", err)
 	}
 	content, err := os.ReadFile(path)

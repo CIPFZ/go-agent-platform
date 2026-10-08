@@ -14,7 +14,7 @@
 - 输出长度限制、命令超时、策略拒绝。
 - PowerShell 启动的 `ping.exe` 子进程取消；Windows Job Object 确认整棵进程树被清理。
 - Windows Agent 重启后的重新注册和任务执行。
-- 无 Windows 图形截图能力时返回明确的 `no_display`。
+- Windows 桌面截图通过 PowerShell/System.Drawing 生成 PNG 制品并下载校验。
 
 恢复回归：停止 Windows 虚机后 Gateway 将 Agent 标记为 `offline`；再次启动并进入桌面后同一 Agent ID 恢复为 `online`。
 

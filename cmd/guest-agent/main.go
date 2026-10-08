@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -75,6 +76,13 @@ func detectCapabilities() []protocol.Capability {
 		{Name: string(protocol.ActionCommandExec), Version: "1"},
 		{Name: string(protocol.ActionFileRead), Version: "1"},
 		{Name: string(protocol.ActionFileWrite), Version: "1"},
+	}
+	if runtime.GOOS == "windows" {
+		capabilities = append(capabilities, protocol.Capability{
+			Name: string(protocol.ActionDesktopScreenshot), Version: "1",
+			Attributes: map[string]string{"helper": "powershell"},
+		})
+		return capabilities
 	}
 	if strings.TrimSpace(os.Getenv("DISPLAY")) == "" && strings.TrimSpace(os.Getenv("WAYLAND_DISPLAY")) == "" {
 		return capabilities
