@@ -66,7 +66,7 @@ func (e Executor) executeCommand(parent context.Context, action *protocol.Comman
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	command := exec.CommandContext(ctx, program, action.Argv[1:]...)
-	cleanup := configureProcess(command)
+	cleanup, runCommand := configureProcess(command)
 	defer cleanup()
 	command.Dir = e.Workspace
 	if action.WorkingDir != "" {
@@ -104,7 +104,7 @@ func (e Executor) executeCommand(parent context.Context, action *protocol.Comman
 	}
 	stdout, stderr := &limitedBuffer{limit: limit}, &limitedBuffer{limit: limit}
 	command.Stdout, command.Stderr = stdout, stderr
-	err := command.Run()
+	err := runCommand()
 	result := protocol.TaskResult{Status: protocol.TaskStatusSucceeded, Stdout: stdout.String(), Stderr: stderr.String()}
 	if stdout.truncated || stderr.truncated {
 		result.ErrorCode = "output_limited"

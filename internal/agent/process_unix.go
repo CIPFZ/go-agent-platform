@@ -12,7 +12,7 @@ import (
 
 // Each task has its own process group. Cancellation also stops descendants
 // which inherited stdout/stderr, so they cannot keep Wait blocked indefinitely.
-func configureProcess(command *exec.Cmd) func() {
+func configureProcess(command *exec.Cmd) (func(), func() error) {
 	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	command.WaitDelay = time.Second
 	kill := func() error {
@@ -26,9 +26,10 @@ func configureProcess(command *exec.Cmd) func() {
 		return err
 	}
 	command.Cancel = kill
-	return func() {
+	cleanup := func() {
 		if command.ProcessState == nil {
 			_ = kill()
 		}
 	}
+	return cleanup, command.Run
 }

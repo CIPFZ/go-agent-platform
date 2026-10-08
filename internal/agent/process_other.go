@@ -1,4 +1,4 @@
-//go:build !linux && !darwin
+//go:build !linux && !darwin && !windows
 
 package agent
 
@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func configureProcess(command *exec.Cmd) func() {
+func configureProcess(command *exec.Cmd) (func(), func() error) {
 	command.WaitDelay = time.Second
-	return func() {}
+	return func() {}, command.Run
 }
