@@ -76,7 +76,7 @@ agent_payload() {
   local action=$1
   local key=$2
   jq -cn --arg agent "$AGENT_ID" --arg key "$key" --argjson action "$action" \
-    '{agent_id:$agent, idempotency_key:$key, action:$action}'
+    '{caller_id:"vm-functional-e2e", agent_id:$agent, idempotency_key:$key, action:$action}'
 }
 
 printf 'case command.exec\n'
