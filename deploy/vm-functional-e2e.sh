@@ -36,7 +36,7 @@ create_task() {
     cat "$out" >&2
     return 1
   fi
-  jq -r '.task_id' "$out"
+  jq -r '.task.task_id' "$out"
 }
 
 wait_task() {
@@ -46,7 +46,7 @@ wait_task() {
     curl -fsS --max-time "$CURL_TIMEOUT" "${AUTH[@]}" \
       "$GATEWAY_URL/api/v1/tasks/$task_id" >"$WORK/task.json"
     local status
-    status=$(jq -r '.status' "$WORK/task.json")
+    status=$(jq -r '.task.status' "$WORK/task.json")
     case "$status" in
       succeeded|failed|cancelled) return 0 ;;
     esac
@@ -60,7 +60,7 @@ assert_value() {
   local filter=$1
   local expected=$2
   local actual
-  actual=$(jq -r "$filter" "$WORK/task.json")
+  actual=$(jq -r ".task$filter" "$WORK/task.json")
   [[ "$actual" == "$expected" ]] || { echo "assertion failed: $filter = $actual (expected $expected)" >&2; return 1; }
 }
 
@@ -102,20 +102,20 @@ printf 'case file write/read/artifact\n'
 write_action=$(jq -cn --arg b64 'dm0tZmlsZS1jb250ZW50' '{type:"file.write",file:{path:"functional-e2e.txt",content:$b64,overwrite:true}}')
 id=$(run_task "$(agent_payload "$write_action" "vm-file-write-1")")
 assert_value '.status' succeeded
-artifact=$(jq -r '.result.artifact_id' "$WORK/task.json")
+artifact=$(jq -r '.task.result.artifacts[0].artifact_id' "$WORK/task.json")
 [[ -n "$artifact" && "$artifact" != null ]] || { echo 'missing artifact id' >&2; exit 1; }
-curl -fsS --max-time "$CURL_TIMEOUT" "${AUTH[@]}" "$GATEWAY_URL/api/v1/artifacts/$artifact" -o "$WORK/artifact.bin"
+curl -fsS --max-time "$CURL_TIMEOUT" "${AUTH[@]}" "$GATEWAY_URL/api/v1/tasks/$id/artifacts/$artifact" -o "$WORK/artifact.bin"
 [[ "$(cat "$WORK/artifact.bin")" == vm-file-content ]] || { echo 'artifact content mismatch' >&2; exit 1; }
 read_action=$(jq -cn '{type:"file.read",file:{path:"functional-e2e.txt",max_bytes:1024}}')
 id=$(run_task "$(agent_payload "$read_action" "vm-file-read-1")")
 assert_value '.status' succeeded
-assert_value '.result.content' vm-file-content
+assert_value '.result.stdout' vm-file-content
 
 printf 'case file overwrite denial\n'
 write_no_overwrite=$(jq -cn --arg b64 'bmV3' '{type:"file.write",file:{path:"functional-e2e.txt",content:$b64,overwrite:false}}')
 id=$(run_task "$(agent_payload "$write_no_overwrite" "vm-file-overwrite-deny")")
 assert_value '.status' failed
-assert_value '.error.code' file_exists
+assert_value '.result.error_code' file_exists
 
 printf 'case symlink boundary\n'
 link_action=$(jq -cn '{type:"command.exec",command:{argv:["ln","-s","/etc/passwd","outside-link"]}}')
@@ -124,7 +124,7 @@ assert_value '.status' succeeded
 read_link=$(jq -cn '{type:"file.read",file:{path:"outside-link",max_bytes:1024}}')
 id=$(run_task "$(agent_payload "$read_link" "vm-symlink-read")")
 assert_value '.status' failed
-assert_value '.error.code' invalid_path
+assert_value '.result.error_code' invalid_path
 
 printf 'case file size boundary\n'
 large_action=$(jq -cn '{type:"command.exec",command:{argv:["dd","if=/dev/zero","of=large-e2e.bin","bs=1M","count=3"]}}')
@@ -133,7 +133,7 @@ assert_value '.status' succeeded
 large_read=$(jq -cn '{type:"file.read",file:{path:"large-e2e.bin",max_bytes:64}}')
 id=$(run_task "$(agent_payload "$large_read" "vm-large-file-read")")
 assert_value '.status' failed
-assert_value '.error.code' file_too_large
+assert_value '.result.error_code' file_too_large
 
 printf 'case output limit\n'
 output_action=$(jq -cn '{type:"command.exec",command:{argv:["printf","1234567890"],output_limit_bytes:4}}')
@@ -146,7 +146,7 @@ printf 'case command timeout\n'
 timeout_action=$(jq -cn '{type:"command.exec",command:{argv:["sleep","5"],timeout_seconds:1}}')
 id=$(run_task "$(agent_payload "$timeout_action" "vm-timeout")")
 assert_value '.status' failed
-assert_value '.error.code' timeout
+assert_value '.result.error_code' timeout
 
 printf 'case process tree cancellation\n'
 cancel_action=$(jq -cn '{type:"command.exec",command:{argv:["sh","-c","sleep 30 & child=$!; printf %s $child > child-e2e.pid; wait"]}}')
@@ -165,12 +165,12 @@ printf 'case policy denial\n'
 policy_action=$(jq -cn '{type:"command.exec",command:{argv:["rm","-f","blocked"]}}')
 id=$(run_task "$(agent_payload "$policy_action" "vm-policy-deny")")
 assert_value '.status' failed
-assert_value '.error.code' policy_denied
+assert_value '.result.error_code' policy_denied
 
 printf 'case screenshot on headless VM\n'
 screenshot_action=$(jq -cn '{type:"desktop.screenshot",screenshot:{output_path:"screen.png"}}')
 id=$(run_task "$(agent_payload "$screenshot_action" "vm-screenshot-headless")")
 assert_value '.status' failed
-assert_value '.error.code' no_display
+assert_value '.result.error_code' no_display
 
 printf 'VM functional E2E passed for agent %s\n' "$AGENT_ID"
