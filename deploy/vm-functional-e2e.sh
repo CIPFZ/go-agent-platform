@@ -23,7 +23,7 @@ request_id() {
 envelope() {
   local payload=$1
   jq -cn --arg rid "$(request_id)" --argjson payload "$payload" \
-    '{protocol_version:"1", request_id:$rid, timestamp:now|todateiso8601, caller:"vm-functional-e2e", payload:$payload}'
+    '$payload + {protocol_version:"1", request_id:$rid, timestamp:(now|todateiso8601)}'
 }
 
 create_task() {
