@@ -9,7 +9,7 @@ POLL_INTERVAL=${POLL_INTERVAL:-1}
 POLL_TIMEOUT=${POLL_TIMEOUT:-45}
 
 command -v curl >/dev/null
-a command -v jq >/dev/null
+command -v jq >/dev/null
 
 TOKEN=$(<"$GATEWAY_TOKEN_FILE")
 AUTH=(-H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json')
