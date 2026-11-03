@@ -2,6 +2,7 @@
 package file
 
 import (
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -34,3 +35,5 @@ func WriteAtomic(path string, r io.Reader, overwrite bool) (int64, error) {
 	}
 	return n, os.Link(tmp.Name(), path)
 }
+
+var errUnsupported = errors.New("not supported on this platform")
