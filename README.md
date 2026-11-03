@@ -1,42 +1,22 @@
-# Go Agent Platform
+# go-agent-platform
 
-面向虚拟机环境的独立 Agent 平台。它与 GoWebFrame CMS 分开维护：CMS 负责虚拟机生命周期，Agent Platform 负责虚拟机内的操作能力。
+`vm-agent`：运行在虚拟机桌面会话内的单二进制 HTTP 服务，让外部 AI Agent 或自动化程序同步调用截图、输入、窗口、进程、文件、剪贴板、录屏等桌面操作。
 
-## 目标
+唯一设计依据见 [`docs/spec.md`](docs/spec.md)。
 
-- 由虚拟机内的 `guest-agent` 通过 HTTP/HTTPS 主动连接 `gateway`，不要求对虚拟机开放入站 SSH 或 Agent 端口。
-- 为命令执行、截图、文件传输和后续桌面操作提供统一的任务接口。
-- 使用任务 ID、队列、并发上限、超时、取消、输出限制和审计记录，保证长任务和高并发下行为可追踪。
-- 对高风险命令进行策略检查并返回明确的阻断原因或人工确认信号。
-
-## 目录
-
-- `cmd/gateway`：中心网关服务。
-- `cmd/guest-agent`：安装在虚拟机内的轻量 Agent。
-- `internal/protocol`：网关和 Agent 共用的 HTTP 数据模型与版本约束。
-- `docs`：项目背景、架构、协议、安全边界、路线图和开发约定。
-- `deploy`：服务化和镜像部署样例。
-
-## 当前状态
-
-当前版本包含 Agent 注册/心跳/优雅离线、Gateway 任务队列与幂等/租约/取消/重试、guest-agent 的命令与文件执行器、截图适配、策略检查、文件审计、健康指标和 CMS HTTP 客户端边界。任务、Agent 注册表和审计支持本地持久化；生产部署通过凭据文件轮换和 HTTPS 参数接入环境。
-
-## 文档入口
-
-- [项目背景与决策](docs/project-context.md)
-- [系统架构](docs/architecture.md)
-- [协议与任务模型](docs/protocol.md)
-- [安全与运行边界](docs/security.md)
-- [开发与协作约定](docs/development.md)
-- [实施路线图](docs/roadmap.md)
-
-## 本地运行
+## 构建
 
 ```bash
-go run ./cmd/gateway -addr :8081
-go run ./cmd/guest-agent -gateway http://127.0.0.1:8081
+go build ./...
+GOOS=windows GOARCH=amd64 go build -o dist/vm-agent.exe ./cmd/vm-agent
+GOOS=linux   GOARCH=amd64 go build -o dist/vm-agent-linux-amd64 ./cmd/vm-agent
+GOOS=linux   GOARCH=arm64 go build -o dist/vm-agent-linux-arm64 ./cmd/vm-agent
 ```
 
-## 设计参考
+## 测试
 
-任务协议、幂等、超时、输出上限和后台任务的设计参考了 `/Volumes/workspace/project/rdev` 的经验，但本项目不复用 rdev 的 SSH 传输、Agent 或内部包。
+```bash
+gofmt -l .
+go vet ./...
+go test ./...
+```
