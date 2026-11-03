@@ -13,6 +13,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/CIPFZ/go-agent-platform/internal/actions/file"
+	"github.com/CIPFZ/go-agent-platform/internal/actions/session"
 	"github.com/CIPFZ/go-agent-platform/internal/api"
 	"github.com/CIPFZ/go-agent-platform/internal/audit"
 	"github.com/CIPFZ/go-agent-platform/internal/config"
@@ -32,6 +34,9 @@ func main() {
 	if cfg.Supervise {
 		os.Exit(supervise(cfg, os.Args[1:]))
 	}
+	// Spec 4.1: declare Per-Monitor V2 DPI awareness before anything else
+	// touches the desktop (no-op on Linux).
+	session.InitDPIAwareness()
 	if err := run(cfg); err != nil {
 		log.Printf("vm-agent: %v", err)
 		os.Exit(1)
@@ -65,6 +70,15 @@ func run(cfg *config.Config) error {
 	}
 	httpServer := server.NewHTTPServer(cfg.Listen, srv.Handler())
 	sink.Record(audit.Event{Kind: "startup", Details: map[string]string{"version": version.Version, "listen": listener.Addr().String(), "pid": itoa(os.Getpid())}})
+	// Spec section 7: the free-space floor is also checked at startup; a low
+	// volume is reported but does not stop the service, since only writing
+	// actions are refused.
+	for _, dir := range []string{cfg.JobDir, cfg.RecordDir} {
+		if err := file.CheckFreeSpace(dir); err != nil {
+			log.Printf("vm-agent: %v", err)
+			sink.Record(audit.Event{Kind: "disk_low", Details: map[string]string{"path": dir, "error": err.Error()}})
+		}
+	}
 	log.Printf("vm-agent %s listening on %s", version.Version, listener.Addr())
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
