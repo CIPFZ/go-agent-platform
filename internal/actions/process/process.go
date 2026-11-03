@@ -37,6 +37,7 @@ func StartTree(cmd *exec.Cmd) (*Tree, error) {
 	if err := tree.start(); err != nil {
 		return nil, err
 	}
+	registerTree(tree.Pid())
 	return tree, nil
 }
 
@@ -61,6 +62,7 @@ func (t *Tree) Kill() error {
 func (t *Tree) Wait() error {
 	t.waitOnce.Do(func() {
 		t.waitErr = t.cmd.Wait()
+		unregisterTree(t.cmd.Process.Pid)
 		t.mu.Lock()
 		_ = t.kill()
 		t.release()
@@ -68,4 +70,16 @@ func (t *Tree) Wait() error {
 		t.mu.Unlock()
 	})
 	return t.waitErr
+}
+
+// Command is a resolved program invocation for Launch.
+type Command struct {
+	Path string   // resolved executable
+	Args []string // argv including argv[0]
+	Dir  string
+	Env  []string
+}
+
+func (c Command) cmd() *exec.Cmd {
+	return &exec.Cmd{Path: c.Path, Args: c.Args, Dir: c.Dir, Env: c.Env}
 }

@@ -5,12 +5,15 @@
 package api
 
 import (
+	"fmt"
+	"path/filepath"
 	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/CIPFZ/go-agent-platform/internal/actions/input"
+	"github.com/CIPFZ/go-agent-platform/internal/actions/process"
 	"github.com/CIPFZ/go-agent-platform/internal/actions/screen"
 	"github.com/CIPFZ/go-agent-platform/internal/actions/session"
 	"github.com/CIPFZ/go-agent-platform/internal/actions/window"
@@ -57,6 +60,15 @@ type API struct {
 func New(cfg *config.Config, sink audit.Sink) (*API, error) {
 	pol, err := policy.Load(cfg.ExecAllowlist, cfg.ExecDenylist)
 	if err != nil {
+		return nil, err
+	}
+	// Command trees left by a crashed previous run are terminated before
+	// serving (spec D4); the registry then tracks this run's trees.
+	treeDir := filepath.Join(cfg.JobDir, ".trees")
+	if killed := process.ReapOrphans(treeDir); len(killed) > 0 {
+		sink.Record(audit.Event{Kind: "orphans_reaped", Details: map[string]string{"pids": fmt.Sprint(killed)}})
+	}
+	if err := process.TrackTrees(treeDir); err != nil {
 		return nil, err
 	}
 	return NewWithDeps(Deps{
@@ -113,6 +125,7 @@ func (a *API) Routes() []*server.Route {
 	}
 	r = append(r, a.inputRoutes()...)
 	r = append(r, a.windowRoutes()...)
+	r = append(r, a.processRoutes()...)
 	return r
 }
 

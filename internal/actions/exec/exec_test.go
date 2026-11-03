@@ -10,3 +10,12 @@ func TestOutputLimitClamp(t *testing.T) {
 		}
 	}
 }
+
+func TestDecodeOutputReplacesInvalidUTF8(t *testing.T) {
+	if got := DecodeOutput("sh", []byte("ok\xffx")); got != "ok�x" {
+		t.Fatalf("got %q", got)
+	}
+	if got := DecodeOutput("cmd", []byte("héllo")); got != "héllo" {
+		t.Fatalf("valid UTF-8 changed: %q", got)
+	}
+}

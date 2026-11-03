@@ -80,7 +80,7 @@ func (a *API) capabilities(c *server.Call) (any, error) {
 // actions lists the supported action groups. Display-bound groups are
 // omitted while the display is not ready (spec section 9).
 func (a *API) actions(displayReady bool) []string {
-	var out []string
+	out := []string{"exec", "process"}
 	if displayReady {
 		out = append(out, "screen", "input", "window")
 	}
