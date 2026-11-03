@@ -1,4 +1,4 @@
-name: Go Agent Platform CI
+name: CI
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -17,11 +17,68 @@ jobs:
           go-version-file: go.mod
       - name: Check formatting
         run: test -z "$(gofmt -l .)"
-      - name: Test
+      - name: Vet (linux, windows)
+        run: |
+          go vet ./...
+          GOOS=windows go vet ./...
+          GOOS=linux GOARCH=arm64 go vet ./...
+      - name: Unit tests
         run: go test ./...
-      - name: Race test
+      - name: Race tests
         run: go test -race ./...
+      - name: Client generator and generated client are current
+        working-directory: tools
+        run: |
+          go vet ./...
+          go test ./...
+
+  linux-x11:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install X11 test environment
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            xvfb openbox mousepad dbus jq curl ffmpeg
+      - name: Integration suite and e2e regression on Xvfb + openbox
+        env:
+          VM_AGENT_RACE: "1"
+        run: deploy/ci/linux-x11.sh
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
       - name: Vet
         run: go vet ./...
-      - name: Build
-        run: go build ./...
+      - name: Unit tests
+        run: go test ./...
+
+  binaries:
+    runs-on: ubuntu-24.04
+    needs: [verify]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build windows/amd64, linux/amd64, linux/arm64
+        run: |
+          version="0.1.0-dev+${GITHUB_SHA::12}"
+          ldflags="-s -w -X github.com/CIPFZ/go-agent-platform/internal/version.Version=${version}"
+          mkdir -p dist
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "$ldflags" -o dist/vm-agent-windows-amd64.exe ./cmd/vm-agent
+          GOOS=linux   GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "$ldflags" -o dist/vm-agent-linux-amd64 ./cmd/vm-agent
+          GOOS=linux   GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -ldflags "$ldflags" -o dist/vm-agent-linux-arm64 ./cmd/vm-agent
+          (cd dist && sha256sum * > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vm-agent-binaries
+          path: dist/
