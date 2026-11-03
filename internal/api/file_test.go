@@ -32,8 +32,8 @@ func TestFileWriteReadRoundTrip(t *testing.T) {
 	if s.Status != 200 || string(s.Body) != "file" || s.Header.Get(protocol.HeaderResultSize) != "4" || s.Header.Get(protocol.HeaderFileMtime) == "" || len(s.Header.Get(protocol.HeaderResultSHA256)) != 64 {
 		t.Fatalf("stream = %d %q %v", s.Status, s.Body, s.Header)
 	}
-	ev := e.audit.List()
-	for _, x := range ev {
+	e.lastAudit("file.read")
+	for _, x := range e.auditEvents(4) {
 		if x.Action == "file.write" && (x.Params["path"] != p || x.Params["content"] != "") {
 			t.Fatalf("write audit = %v", x.Params)
 		}

@@ -150,8 +150,7 @@ func TestInputValidation(t *testing.T) {
 func TestKeyTypeAuditOmitsText(t *testing.T) {
 	e, _ := inputEnv(t)
 	e.call("POST", "/v1/input/key/type", `{"text":"hunter2"}`)
-	ev := e.audit.List()
-	last := ev[len(ev)-1]
+	last := e.lastAudit("input.key.type")
 	if last.Params["chars"] != "7" || strings.Contains(fmt.Sprint(last.Params), "hunter2") {
 		t.Fatalf("audit params = %v", last.Params)
 	}

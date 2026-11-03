@@ -33,8 +33,8 @@ func TestExecSyncResult(t *testing.T) {
 	if strings.TrimSpace(cwd.Stdout) != dir {
 		t.Fatalf("cwd = %q", cwd.Stdout)
 	}
-	ev := e.audit.List()
-	last := ev[len(ev)-1]
+	ev := e.auditEvents(3) // three exec calls above
+	last := ev[2]
 	if last.Params["argv0"] != "pwd" || last.Params["argc"] != "1" || last.Params["env_keys"] != "A" || len(last.Params["argv_sha256"]) != 64 || last.Params["argv"] != "" {
 		t.Fatalf("audit = %v", last.Params)
 	}

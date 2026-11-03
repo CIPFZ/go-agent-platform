@@ -229,11 +229,47 @@ func TestScreenInfoAndCursor(t *testing.T) {
 func TestCaptureAuditsSizeAndHash(t *testing.T) {
 	e := newEnv(t)
 	e.call("POST", "/v1/screen/capture", `{}`)
-	ev := e.audit.List()
-	last := ev[len(ev)-1]
+	last := e.lastAudit("screen.capture")
 	if last.Action != "screen.capture" || last.Params["width"] != "800" || len(last.Params["sha256"]) != 64 {
 		t.Fatalf("audit = %+v", last)
 	}
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }
+
+// auditEvents waits until at least n audit events exist. The server records
+// an event only after the response has been flushed, so a test can see the
+// response before its audit record.
+func (e *testEnv) auditEvents(n int) []audit.Event {
+	e.t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		ev := e.audit.List()
+		if len(ev) >= n || time.Now().After(deadline) {
+			if len(ev) < n {
+				e.t.Fatalf("only %d of %d audit events recorded", len(ev), n)
+			}
+			return ev
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// lastAudit waits for the next audit event of action after the call that
+// was just made and returns the most recent one.
+func (e *testEnv) lastAudit(action string) audit.Event {
+	e.t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		ev := e.audit.List()
+		for i := len(ev) - 1; i >= 0; i-- {
+			if ev[i].Action == action {
+				return ev[i]
+			}
+		}
+		if time.Now().After(deadline) {
+			e.t.Fatalf("no audit event for %s", action)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}

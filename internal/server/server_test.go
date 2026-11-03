@@ -37,6 +37,23 @@ type harness struct {
 	gate  chan struct{}
 }
 
+// events waits until at least n audit events exist; observe records an
+// event only after the response has been flushed to the client.
+func (h *harness) events(t *testing.T, n int) []audit.Event {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		ev := h.audit.List()
+		if len(ev) >= n {
+			return ev
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("only %d of %d audit events recorded", len(ev), n)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 func newHarness(t *testing.T, maxConcurrency int, extra ...*Route) *harness {
 	t.Helper()
 	h := &harness{audit: audit.NewMemorySink(100), gate: make(chan struct{})}
@@ -170,7 +187,7 @@ func TestDedupReplaysCompletedResponse(t *testing.T) {
 	if resp.StatusCode != 200 || resp.Header.Get(protocol.HeaderDedupHit) != "true" || string(second.Result) != string(first.Result) || *second.ElapsedMS != *first.ElapsedMS {
 		t.Fatalf("replay status=%d hit=%q first=%+v second=%+v", resp.StatusCode, resp.Header.Get(protocol.HeaderDedupHit), first, second)
 	}
-	events := h.audit.List()
+	events := h.events(t, 2)
 	if last := events[len(events)-1]; !last.DedupHit || last.Code != "ok" {
 		t.Fatalf("audit of replay = %+v", last)
 	}
@@ -342,7 +359,7 @@ func TestAuditOneRecordPerRequest(t *testing.T) {
 	h.do(t, "POST", "/v1/act", `{}`, map[string]string{protocol.HeaderRequestID: rid})
 	h.do(t, "GET", "/v1/nope", ``, nil)
 	h.do(t, "POST", "/v1/act", `{}`, map[string]string{protocol.HeaderRequestID: "bad"})
-	events := h.audit.List()
+	events := h.events(t, 3)
 	if len(events) != 3 {
 		t.Fatalf("events = %+v", events)
 	}
