@@ -1,0 +1,1048 @@
+openapi: 3.0.3
+info:
+  title: vm-agent
+  version: v1
+  description: |
+    Synchronous HTTP API of vm-agent, the in-VM desktop automation service
+    (docs/spec.md). Every request is executed once and answered once; long
+    operations return an identifier to query later (spec D8).
+
+    Conventions:
+    - Coordinates are physical pixels of the virtual desktop with the primary
+      display's top-left corner as origin; secondary displays may be negative.
+    - JSON request bodies are limited to 8 MiB and must not contain unknown
+      fields. An empty body is treated as {}.
+    - Successful JSON responses are an envelope {ok, request_id, elapsed_ms,
+      result}; errors are {ok:false, request_id, error}. See docs/errors.md.
+    - Non-retryable actions sent with X-Request-Id are deduplicated for the
+      dedup window by method + path + request id: a repeat while the first is
+      running gets conflict/in_flight, a later repeat replays the first
+      response with HTTP 200 and X-Dedup-Hit: true.
+    - Authentication and TLS are not implemented (spec D9); restrict access at
+      the network layer.
+servers:
+  - url: http://{host}:7070
+    variables:
+      host:
+        default: 127.0.0.1
+
+tags:
+  - name: system
+  - name: screen
+  - name: input
+  - name: window
+  - name: process
+  - name: file
+
+paths:
+  /v1/probe:
+    get:
+      operationId: probe
+      tags: [system]
+      summary: Service and desktop session health
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      responses:
+        '200':
+          description: Probe result.
+          headers: {X-Agent-Version: {$ref: '#/components/headers/AgentVersion'}}
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties: {result: {$ref: '#/components/schemas/ProbeResult'}}
+        default: {$ref: '#/components/responses/Error'}
+
+  /v1/capabilities:
+    get:
+      operationId: capabilities
+      tags: [system]
+      summary: Supported action groups and limits
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      responses:
+        '200':
+          description: Capabilities.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties: {result: {$ref: '#/components/schemas/CapabilitiesResult'}}
+        default: {$ref: '#/components/responses/Error'}
+
+  /v1/screen/capture:
+    post:
+      operationId: screenCapture
+      tags: [screen]
+      summary: Capture a display, the virtual desktop or a region
+      description: |
+        Retryable. Default timeout 5 s. With encoding=stream the body is the
+        raw image and metadata is in the X-Result-* headers.
+      x-stream-request: {field: encoding, value: stream}
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CaptureRequest'}
+      responses:
+        '200':
+          description: Captured image.
+          headers:
+            X-Result-Width: {$ref: '#/components/headers/ResultWidth'}
+            X-Result-Height: {$ref: '#/components/headers/ResultHeight'}
+            X-Result-Sha256: {$ref: '#/components/headers/ResultSha256'}
+            X-Result-Size: {$ref: '#/components/headers/ResultSize'}
+            X-Cursor-X: {$ref: '#/components/headers/CursorX'}
+            X-Cursor-Y: {$ref: '#/components/headers/CursorY'}
+            X-Captured-At: {$ref: '#/components/headers/CapturedAt'}
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties: {result: {$ref: '#/components/schemas/CaptureResult'}}
+            image/jpeg:
+              schema: {type: string, format: binary}
+            image/png:
+              schema: {type: string, format: binary}
+        default: {$ref: '#/components/responses/Error'}
+
+  /v1/screen/info:
+    get:
+      operationId: screenInfo
+      tags: [screen]
+      summary: List displays
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      responses:
+        '200':
+          description: Displays, primary first.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties: {result: {$ref: '#/components/schemas/ScreenInfoResult'}}
+        default: {$ref: '#/components/responses/Error'}
+
+  /v1/screen/cursor:
+    get:
+      operationId: screenCursor
+      tags: [screen]
+      summary: Pointer position and visibility
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      responses:
+        '200':
+          description: Cursor.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties: {result: {$ref: '#/components/schemas/Cursor'}}
+        default: {$ref: '#/components/responses/Error'}
+
+  /v1/input/mouse/move:
+    post:
+      operationId: mouseMove
+      tags: [input]
+      summary: Move the pointer
+      description: Not retryable. Default timeout 5 s plus duration_ms.
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/MouseMoveRequest'}}}
+      responses:
+        '200': {$ref: '#/components/responses/Empty'}
+        default: {$ref: '#/components/responses/Error'}
+
+  /v1/input/mouse/click:
+    post:
+      operationId: mouseClick
+      tags: [input]
+      summary: Click, optionally after moving to x, y
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/MouseClickRequest'}}}
+      responses:
+        '200': {$ref: '#/components/responses/Empty'}
+        default: {$ref: '#/components/responses/Error'}
+
+  /v1/input/mouse/down:
+    post:
+      operationId: mouseDown
+      tags: [input]
+      summary: Press and hold a mouse button
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/MouseButtonRequest'}}}
+      responses:
+        '200': {$ref: '#/components/responses/Empty'}
+        default: {$ref: '#/components/responses/Error'}
+
+  /v1/input/mouse/up:
+    post:
+      operationId: mouseUp
+      tags: [input]
+      summary: Release a mouse button
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/MouseButtonRequest'}}}
+      responses:
+        '200': {$ref: '#/components/responses/Empty'}
+        default: {$ref: '#/components/responses/Error'}
+
+  /v1/input/mouse/drag:
+    post:
+      operationId: mouseDrag
+      tags: [input]
+      summary: Press at from, move to to, release
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/MouseDragRequest'}}}
+      responses:
+        '200': {$ref: '#/components/responses/Empty'}
+        default: {$ref: '#/components/responses/Error'}
+
+  /v1/input/mouse/scroll:
+    post:
+      operationId: mouseScroll
+      tags: [input]
+      summary: Scroll by wheel ticks
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/MouseScrollRequest'}}}
+      responses:
+        '200': {$ref: '#/components/responses/Empty'}
+        default: {$ref: '#/components/responses/Error'}
+
+  /v1/input/key/type:
+    post:
+      operationId: keyType
+      tags: [input]
+      summary: Type text
+      description: Default timeout 5 s plus the typing time (characters x interval_ms).
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/KeyTypeRequest'}}}
+      responses:
+        '200': {$ref: '#/components/responses/Empty'}
+        default: {$ref: '#/components/responses/Error'}
+
+  /v1/input/key/press:
+    post:
+      operationId: keyPress
+      tags: [input]
+      summary: Press and release one key
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/KeyRequest'}}}
+      responses:
+        '200': {$ref: '#/components/responses/Empty'}
+        default: {$ref: '#/components/responses/Error'}
+
+  /v1/input/key/down:
+    post:
+      operationId: keyDown
+      tags: [input]
+      summary: Press and hold one key
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/KeyRequest'}}}
+      responses:
+        '200': {$ref: '#/components/responses/Empty'}
+        default: {$ref: '#/components/responses/Error'}
+
+  /v1/input/key/up:
+    post:
+      operationId: keyUp
+      tags: [input]
+      summary: Release one key
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/KeyRequest'}}}
+      responses:
+        '200': {$ref: '#/components/responses/Empty'}
+        default: {$ref: '#/components/responses/Error'}
+
+  /v1/input/key/hotkey:
+    post:
+      operationId: keyHotkey
+      tags: [input]
+      summary: Press keys in order and release them in reverse order
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/HotkeyRequest'}}}
+      responses:
+        '200': {$ref: '#/components/responses/Empty'}
+        default: {$ref: '#/components/responses/Error'}
+
+  /v1/input/batch:
+    post:
+      operationId: inputBatch
+      tags: [input]
+      summary: Run up to 200 input actions in order
+      description: |
+        The whole batch is validated before anything runs. Execution stops at
+        the first failure; the error details carry executed, index and type.
+        Default timeout: the sum of the actions' defaults plus 5 s, capped at
+        60 s; a longer X-Timeout-Ms (up to 10 minutes) is honoured. The batch
+        is deduplicated as one request.
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/BatchRequest'}}}
+      responses:
+        '200':
+          description: All actions completed.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties: {result: {$ref: '#/components/schemas/BatchResult'}}
+        default: {$ref: '#/components/responses/Error'}
+
+  /v1/window/list:
+    get:
+      operationId: windowList
+      tags: [window]
+      summary: List top-level windows in Z order, topmost first
+      parameters:
+        - {$ref: '#/components/parameters/RequestID'}
+        - {$ref: '#/components/parameters/TimeoutMS'}
+        - name: visible_only
+          in: query
+          schema: {type: boolean, default: true}
+      responses:
+        '200':
+          description: Windows.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties: {result: {$ref: '#/components/schemas/WindowListResult'}}
+        default: {$ref: '#/components/responses/Error'}
+
+  /v1/window/active:
+    get:
+      operationId: windowActive
+      tags: [window]
+      summary: The foreground window
+      description: not_found when no window has the focus.
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      responses:
+        '200': {$ref: '#/components/responses/Window'}
+        default: {$ref: '#/components/responses/Error'}
+
+  /v1/window/activate:
+    post:
+      operationId: windowActivate
+      tags: [window]
+      summary: Bring a window to the foreground
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/WindowSelector'}}}
+      responses:
+        '200': {$ref: '#/components/responses/Window'}
+        default: {$ref: '#/components/responses/Error'}
+
+  /v1/window/close:
+    post:
+      operationId: windowClose
+      tags: [window]
+      summary: Ask a window to close (never kills)
+      description: Returns the window as it was when the close request was sent.
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/WindowSelector'}}}
+      responses:
+        '200': {$ref: '#/components/responses/Window'}
+        default: {$ref: '#/components/responses/Error'}
+
+  /v1/exec:
+    post:
+      operationId: exec
+      tags: [process]
+      summary: Run a command (argv array, no shell)
+      description: |
+        Synchronous mode waits for exit; default timeout 30 s, after which (or
+        on disconnect) the whole process tree is killed. A non-zero exit code
+        is a successful response. Put an interpreter first in argv for shell
+        syntax, e.g. ["sh","-c","ls | wc -l"].
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/ExecRequest'}}}
+      responses:
+        '200':
+          description: Command result.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties: {result: {$ref: '#/components/schemas/ExecResult'}}
+        default: {$ref: '#/components/responses/Error'}
+
+  /v1/process/launch:
+    post:
+      operationId: processLaunch
+      tags: [process]
+      summary: Start a program detached from vm-agent
+      description: The program does not inherit vm-agent's lifetime and its output is not collected. Default timeout 10 s.
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/LaunchRequest'}}}
+      responses:
+        '200':
+          description: Started.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties: {result: {$ref: '#/components/schemas/LaunchResult'}}
+        default: {$ref: '#/components/responses/Error'}
+
+  /v1/process/open:
+    post:
+      operationId: processOpen
+      tags: [process]
+      summary: Open a file or URL with its default application
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/OpenRequest'}}}
+      responses:
+        '200':
+          description: Handed to the default application.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties: {result: {$ref: '#/components/schemas/OpenResult'}}
+        default: {$ref: '#/components/responses/Error'}
+
+  /v1/file/read:
+    post:
+      operationId: fileRead
+      tags: [file]
+      summary: Read up to 64 MiB of a file
+      description: Retryable. Default timeout 60 s. With encoding=stream the body is the raw content.
+      x-stream-request: {field: encoding, value: stream}
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/FileReadRequest'}}}
+      responses:
+        '200':
+          description: File content.
+          headers:
+            X-Result-Size: {$ref: '#/components/headers/ResultSize'}
+            X-Result-Sha256: {$ref: '#/components/headers/ResultSha256'}
+            X-File-Mtime: {$ref: '#/components/headers/FileMtime'}
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties: {result: {$ref: '#/components/schemas/FileReadResult'}}
+            application/octet-stream:
+              schema: {type: string, format: binary}
+        default: {$ref: '#/components/responses/Error'}
+
+  /v1/file/write:
+    post:
+      operationId: fileWrite
+      tags: [file]
+      summary: Atomically write a file (JSON body, 8 MiB limit)
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/FileWriteRequest'}}}
+      responses:
+        '200':
+          description: Written.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties: {result: {$ref: '#/components/schemas/FileWriteResult'}}
+        default: {$ref: '#/components/responses/Error'}
+
+  /v1/file/stat:
+    post:
+      operationId: fileStat
+      tags: [file]
+      summary: Describe a path
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/FilePathRequest'}}}
+      responses:
+        '200':
+          description: Path information; exists is false for a missing path.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties: {result: {$ref: '#/components/schemas/FileInfo'}}
+        default: {$ref: '#/components/responses/Error'}
+
+  /v1/file/list:
+    post:
+      operationId: fileList
+      tags: [file]
+      summary: List a directory
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/FileListRequest'}}}
+      responses:
+        '200':
+          description: Entries.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties: {result: {$ref: '#/components/schemas/FileListResult'}}
+        default: {$ref: '#/components/responses/Error'}
+
+  /v1/file/mkdir:
+    post:
+      operationId: fileMkdir
+      tags: [file]
+      summary: Create a directory and missing parents
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/FilePathRequest'}}}
+      responses:
+        '200': {$ref: '#/components/responses/Empty'}
+        default: {$ref: '#/components/responses/Error'}
+
+  /v1/file/known_dirs:
+    get:
+      operationId: fileKnownDirs
+      tags: [file]
+      summary: The user's special directories
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      responses:
+        '200':
+          description: Directories.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties: {result: {$ref: '#/components/schemas/KnownDirs'}}
+        default: {$ref: '#/components/responses/Error'}
+
+components:
+  parameters:
+    RequestID:
+      name: X-Request-Id
+      in: header
+      description: 16 to 128 characters of [A-Za-z0-9._-]; audit correlation and deduplication.
+      schema: {type: string, pattern: '^[A-Za-z0-9._-]{16,128}$'}
+    TimeoutMS:
+      name: X-Timeout-Ms
+      in: header
+      description: Request timeout in milliseconds, truncated to 10 minutes (1 hour for transfers).
+      schema: {type: integer, format: int64, minimum: 1}
+
+  headers:
+    AgentVersion: {description: Service version., schema: {type: string}}
+    DedupHit: {description: Present with value true on a replayed response., schema: {type: string}}
+    ResultWidth: {schema: {type: integer}}
+    ResultHeight: {schema: {type: integer}}
+    ResultSha256: {schema: {type: string}}
+    ResultSize: {schema: {type: integer, format: int64}}
+    CursorX: {schema: {type: integer}}
+    CursorY: {schema: {type: integer}}
+    CapturedAt: {schema: {type: string, format: date-time}}
+    FileMtime: {schema: {type: string, format: date-time}}
+
+  responses:
+    Error:
+      description: Error envelope; see docs/errors.md for codes and details.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorResponse'}
+    Empty:
+      description: Done; result is an empty object.
+      headers:
+        X-Dedup-Hit: {$ref: '#/components/headers/DedupHit'}
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/Envelope'
+              - type: object
+                properties: {result: {$ref: '#/components/schemas/Empty'}}
+    Window:
+      description: One window.
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/Envelope'
+              - type: object
+                properties: {result: {$ref: '#/components/schemas/Window'}}
+
+  schemas:
+    Envelope:
+      type: object
+      required: [ok, request_id]
+      properties:
+        ok: {type: boolean}
+        request_id: {type: string}
+        elapsed_ms: {type: integer, format: int64}
+    ErrorResponse:
+      type: object
+      required: [ok, request_id, error]
+      properties:
+        ok: {type: boolean}
+        request_id: {type: string}
+        error: {$ref: '#/components/schemas/Error'}
+    Error:
+      type: object
+      required: [code, message, retryable]
+      properties:
+        code:
+          type: string
+          enum: [invalid_request, not_found, ambiguous, conflict, too_large, unsupported, no_display, busy, timeout, io_failed, internal]
+        message: {type: string}
+        retryable: {type: boolean}
+        details: {type: object, additionalProperties: true}
+    Empty:
+      type: object
+    Point:
+      type: object
+      required: [x, y]
+      properties:
+        x: {type: integer}
+        y: {type: integer}
+    Rect:
+      type: object
+      required: [x, y, w, h]
+      properties:
+        x: {type: integer}
+        y: {type: integer}
+        w: {type: integer}
+        h: {type: integer}
+
+    PrimaryDisplay:
+      type: object
+      required: [w, h, scale]
+      properties:
+        w: {type: integer}
+        h: {type: integer}
+        scale: {type: number}
+    DisplayStatus:
+      type: object
+      required: [ready, degraded, count, dpi_awareness]
+      properties:
+        ready: {type: boolean, description: False without a usable graphical session or while locked.}
+        degraded: {type: boolean, description: True after 3 consecutive capture timeouts.}
+        count: {type: integer}
+        dpi_awareness:
+          type: string
+          description: per_monitor_v2, per_monitor, system or unaware on Windows; not_applicable on Linux.
+        primary:
+          nullable: true
+          allOf: [{$ref: '#/components/schemas/PrimaryDisplay'}]
+    ProbeResult:
+      type: object
+      required: [version, api_version, platform, started_at, uptime_seconds, display, session_locked, session_type, uac_prompt]
+      properties:
+        version: {type: string}
+        api_version: {type: string}
+        platform: {type: string, enum: [windows, linux]}
+        started_at: {type: string, format: date-time}
+        uptime_seconds: {type: integer, format: int64}
+        last_input_at: {type: string, format: date-time, nullable: true, description: Last successful input action; null before the first.}
+        display: {$ref: '#/components/schemas/DisplayStatus'}
+        session_locked: {type: boolean}
+        session_type: {type: string, enum: [console, rdp]}
+        uac_prompt: {type: boolean}
+    SessionStatus:
+      type: object
+      required: [locked, type, uac_prompt]
+      properties:
+        locked: {type: boolean}
+        type: {type: string}
+        uac_prompt: {type: boolean}
+    Limits:
+      type: object
+      required: [json_body_max_bytes, multipart_max_bytes, exec_output_max_bytes, file_read_max_bytes, download_max_bytes, batch_max_actions, max_concurrency, sync_timeout_max_ms, transfer_timeout_max_ms]
+      properties:
+        json_body_max_bytes: {type: integer, format: int64}
+        multipart_max_bytes: {type: integer, format: int64}
+        exec_output_max_bytes: {type: integer, format: int64}
+        file_read_max_bytes: {type: integer, format: int64}
+        download_max_bytes: {type: integer, format: int64}
+        batch_max_actions: {type: integer}
+        max_concurrency: {type: integer}
+        sync_timeout_max_ms: {type: integer, format: int64}
+        transfer_timeout_max_ms: {type: integer, format: int64}
+    CapabilitiesResult:
+      type: object
+      required: [platform, version, display, session, actions, limits]
+      properties:
+        platform: {type: string}
+        version: {type: string}
+        display: {$ref: '#/components/schemas/DisplayStatus'}
+        session: {$ref: '#/components/schemas/SessionStatus'}
+        actions:
+          type: array
+          description: Action groups in the order screen, input, window, exec, process, file; display groups are absent while the display is not ready.
+          items: {type: string}
+        limits: {$ref: '#/components/schemas/Limits'}
+
+    CaptureRequest:
+      type: object
+      properties:
+        display: {type: integer, default: 0, description: Display index (0 is the primary) or -1 for the virtual desktop.}
+        region:
+          description: Virtual-desktop rectangle, clipped to the display; entirely outside is invalid_request.
+          allOf: [{$ref: '#/components/schemas/Rect'}]
+        cursor: {type: boolean, default: false, description: Draw the pointer into the image.}
+        format: {type: string, enum: [jpeg, png], default: jpeg}
+        quality: {type: integer, minimum: 1, maximum: 100, default: 85}
+        encoding: {type: string, enum: [base64, stream], default: base64}
+    CaptureResult:
+      type: object
+      required: [image, format, width, height, cursor, captured_at, sha256]
+      properties:
+        image: {type: string, format: byte}
+        format: {type: string}
+        width: {type: integer}
+        height: {type: integer}
+        cursor: {$ref: '#/components/schemas/Point'}
+        captured_at: {type: string, format: date-time}
+        sha256: {type: string}
+    Display:
+      type: object
+      required: [index, bounds, scale, primary]
+      properties:
+        index: {type: integer}
+        bounds: {$ref: '#/components/schemas/Rect'}
+        scale: {type: number}
+        primary: {type: boolean}
+    ScreenInfoResult:
+      type: object
+      required: [displays]
+      properties:
+        displays:
+          type: array
+          items: {$ref: '#/components/schemas/Display'}
+    Cursor:
+      type: object
+      required: [x, y, visible]
+      properties:
+        x: {type: integer}
+        y: {type: integer}
+        visible: {type: boolean}
+
+    MouseMoveRequest:
+      type: object
+      required: [x, y]
+      properties:
+        x: {type: integer}
+        y: {type: integer}
+        duration_ms: {type: integer, minimum: 0, default: 0, description: Interpolate in steps of at least 8 ms and 2 px.}
+    MouseClickRequest:
+      type: object
+      properties:
+        x: {type: integer, description: With y, move here first; otherwise click at the current position.}
+        y: {type: integer}
+        button: {type: string, enum: [left, right, middle], default: left}
+        count: {type: integer, minimum: 1, maximum: 5, default: 1}
+    MouseButtonRequest:
+      type: object
+      properties:
+        button: {type: string, enum: [left, right, middle], default: left}
+    MouseDragRequest:
+      type: object
+      required: [from, to]
+      properties:
+        from: {$ref: '#/components/schemas/Point'}
+        to: {$ref: '#/components/schemas/Point'}
+        button: {type: string, enum: [left, right, middle], default: left}
+        duration_ms: {type: integer, minimum: 0, default: 300}
+    MouseScrollRequest:
+      type: object
+      properties:
+        dx: {type: integer, description: Wheel ticks, positive scrolls right.}
+        dy: {type: integer, description: Wheel ticks, positive scrolls up.}
+    KeyTypeRequest:
+      type: object
+      required: [text]
+      properties:
+        text: {type: string}
+        interval_ms: {type: integer, minimum: 0, default: 5}
+        method: {type: string, enum: [unicode, scancode], default: unicode}
+    KeyRequest:
+      type: object
+      required: [key]
+      properties:
+        key: {type: string, description: A name from docs/keys.md.}
+    HotkeyRequest:
+      type: object
+      required: [keys]
+      properties:
+        keys:
+          type: array
+          minItems: 1
+          maxItems: 8
+          items: {type: string}
+    BatchAction:
+      type: object
+      description: One batch step; type selects which of the other fields apply (the fields of the matching single-action request, plus ms for wait).
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [mouse.move, mouse.click, mouse.down, mouse.up, mouse.drag, mouse.scroll, key.type, key.press, key.down, key.up, key.hotkey, wait]
+        delay_after_ms: {type: integer, minimum: 0, description: Fixed pause after the action completes.}
+        x: {type: integer}
+        y: {type: integer}
+        duration_ms: {type: integer}
+        button: {type: string, enum: [left, right, middle]}
+        count: {type: integer}
+        from: {$ref: '#/components/schemas/Point'}
+        to: {$ref: '#/components/schemas/Point'}
+        dx: {type: integer}
+        dy: {type: integer}
+        text: {type: string}
+        interval_ms: {type: integer}
+        method: {type: string, enum: [unicode, scancode]}
+        key: {type: string}
+        keys:
+          type: array
+          items: {type: string}
+        ms: {type: integer, description: Wait duration (wait only).}
+    BatchRequest:
+      type: object
+      required: [actions]
+      properties:
+        actions:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items: {$ref: '#/components/schemas/BatchAction'}
+    BatchResult:
+      type: object
+      required: [executed]
+      properties:
+        executed: {type: integer}
+
+    Window:
+      type: object
+      required: [id, title, class, pid, rect, client_rect, active, minimized]
+      properties:
+        id: {type: string, description: Opaque hexadecimal handle, e.g. 0x1a0004.}
+        title: {type: string}
+        class: {type: string}
+        pid: {type: integer}
+        rect:
+          nullable: true
+          description: Whole window in physical pixels; null while minimized.
+          allOf: [{$ref: '#/components/schemas/Rect'}]
+        client_rect:
+          nullable: true
+          description: Client area in physical pixels; null while minimized.
+          allOf: [{$ref: '#/components/schemas/Rect'}]
+        active: {type: boolean}
+        minimized: {type: boolean}
+    WindowListResult:
+      type: object
+      required: [windows]
+      properties:
+        windows:
+          type: array
+          items: {$ref: '#/components/schemas/Window'}
+    WindowSelector:
+      type: object
+      description: Either id, or title (with match) intersected with optional class and pid filters. pick resolves several matches.
+      properties:
+        id: {type: string}
+        title: {type: string}
+        match: {type: string, enum: [exact, contains, regex], default: exact}
+        class: {type: string}
+        pid: {type: integer}
+        pick: {type: string, enum: [first, topmost, error], default: error, description: first and topmost both take the topmost match because windows are listed in Z order.}
+
+    ExecRequest:
+      type: object
+      required: [argv]
+      properties:
+        argv:
+          type: array
+          minItems: 1
+          items: {type: string}
+        cwd: {type: string, description: Defaults to the desktop user's home directory.}
+        env:
+          type: object
+          additionalProperties: {type: string}
+          description: Merged over the agent's environment (same name overrides).
+        env_clear: {type: boolean, default: false, description: Use only env.}
+        stdin: {type: string, format: byte, description: Written to stdin, which is then closed.}
+        output_limit_bytes: {type: integer, format: int64, default: 1048576, description: Per stream; at most 67108864.}
+        detach: {type: boolean, default: false, description: Background mode; unsupported until phase 2.}
+        job_timeout_ms: {type: integer, format: int64, description: Background mode only.}
+    ExecResult:
+      type: object
+      required: [exit_code, stdout, stderr, truncated, duration_ms]
+      properties:
+        exit_code: {type: integer}
+        stdout: {type: string}
+        stderr: {type: string}
+        truncated: {type: boolean}
+        duration_ms: {type: integer, format: int64}
+    LaunchRequest:
+      type: object
+      required: [argv]
+      properties:
+        argv:
+          type: array
+          minItems: 1
+          items: {type: string}
+        cwd: {type: string}
+        env:
+          type: object
+          additionalProperties: {type: string}
+        env_clear: {type: boolean, default: false}
+    LaunchResult:
+      type: object
+      required: [pid]
+      properties:
+        pid: {type: integer}
+    OpenRequest:
+      type: object
+      description: Exactly one of path (absolute) or url (http, https or file).
+      properties:
+        path: {type: string}
+        url: {type: string}
+    OpenResult:
+      type: object
+      properties:
+        pid: {type: integer, description: Process started for the target, when known.}
+        handler: {type: string, description: Desktop entry (Linux) or "shell" (Windows).}
+
+    FileReadRequest:
+      type: object
+      required: [path]
+      properties:
+        path: {type: string}
+        offset: {type: integer, format: int64, default: 0}
+        limit: {type: integer, format: int64, description: Bytes to read; 0 or absent reads to the end. At most 67108864.}
+        encoding: {type: string, enum: [base64, stream], default: base64}
+    FileReadResult:
+      type: object
+      required: [content, size, sha256, mtime]
+      properties:
+        content: {type: string, format: byte}
+        size: {type: integer, format: int64, description: Bytes returned.}
+        sha256: {type: string, description: Of the returned bytes.}
+        mtime: {type: string, format: date-time}
+    FileWriteRequest:
+      type: object
+      required: [path, content]
+      properties:
+        path: {type: string}
+        content: {type: string, format: byte}
+        overwrite: {type: boolean, default: false}
+        mkdir: {type: boolean, default: false, description: Create missing parent directories.}
+        sha256: {type: string, description: Expected digest of content.}
+    FileWriteResult:
+      type: object
+      required: [size, sha256]
+      properties:
+        size: {type: integer, format: int64}
+        sha256: {type: string}
+    FilePathRequest:
+      type: object
+      required: [path]
+      properties:
+        path: {type: string}
+    FileInfo:
+      type: object
+      required: [exists, size, hidden, readonly]
+      properties:
+        exists: {type: boolean}
+        type: {type: string, enum: [file, dir, symlink, other]}
+        size: {type: integer, format: int64}
+        mtime: {type: string, format: date-time, nullable: true}
+        hidden: {type: boolean}
+        readonly: {type: boolean}
+    FileListRequest:
+      type: object
+      required: [path]
+      properties:
+        path: {type: string}
+        recursive: {type: boolean, default: false}
+        max_entries: {type: integer, minimum: 1, default: 1000}
+    FileEntry:
+      type: object
+      required: [name, path, type, size, mtime, hidden]
+      properties:
+        name: {type: string}
+        path: {type: string}
+        type: {type: string, enum: [file, dir, symlink, other]}
+        size: {type: integer, format: int64}
+        mtime: {type: string, format: date-time}
+        hidden: {type: boolean}
+    FileListResult:
+      type: object
+      required: [entries, truncated]
+      properties:
+        entries:
+          type: array
+          items: {$ref: '#/components/schemas/FileEntry'}
+        truncated: {type: boolean}
+    KnownDirs:
+      type: object
+      required: [home, desktop, documents, downloads, pictures, temp]
+      properties:
+        home: {type: string}
+        desktop: {type: string}
+        documents: {type: string}
+        downloads: {type: string}
+        pictures: {type: string}
+        temp: {type: string}
