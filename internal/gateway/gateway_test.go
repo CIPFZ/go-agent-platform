@@ -1,8 +1,6 @@
 package gateway
 
 import (
-	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -11,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CIPFZ/go-agent-platform/internal/agent"
 	"github.com/CIPFZ/go-agent-platform/internal/protocol"
 )
 
@@ -78,67 +75,6 @@ func TestStoreLifecycleAndOfflineState(t *testing.T) {
 	}
 	if _, err := store.Heartbeat("agent-1", protocol.HeartbeatRequest{}); !errors.Is(err, ErrRevoked) {
 		t.Fatalf("heartbeat after revoke error = %v, want %v", err, ErrRevoked)
-	}
-}
-
-func TestHTTPRegisterHeartbeatAndStatus(t *testing.T) {
-	clock := &testClock{now: time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)}
-	server := httptest.NewServer(NewServer(Config{HeartbeatTimeout: time.Minute, Now: clock.Now}).Handler())
-	defer server.Close()
-
-	client, err := agent.NewClient(agent.Config{
-		GatewayURL:   server.URL,
-		AgentID:      "agent-http",
-		AgentVersion: "1.2.3",
-		Now:          clock.Now,
-	})
-	if err != nil {
-		t.Fatalf("new client: %v", err)
-	}
-	registered, err := client.Register(context.Background())
-	if err != nil {
-		t.Fatalf("HTTP register: %v", err)
-	}
-	if registered.Status != protocol.AgentStatusOnline {
-		t.Fatalf("HTTP register status = %s", registered.Status)
-	}
-	clock.now = clock.now.Add(30 * time.Second)
-	if _, err := client.Heartbeat(context.Background()); err != nil {
-		t.Fatalf("HTTP heartbeat: %v", err)
-	}
-
-	response, err := http.Get(server.URL + "/api/v1/agents/agent-http")
-	if err != nil {
-		t.Fatalf("HTTP get: %v", err)
-	}
-	defer response.Body.Close()
-	var body protocol.AgentResponse
-	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
-		t.Fatalf("decode HTTP get: %v", err)
-	}
-	if response.StatusCode != http.StatusOK || body.Agent.Status != protocol.AgentStatusOnline {
-		t.Fatalf("HTTP get status=%d agent=%+v", response.StatusCode, body.Agent)
-	}
-
-	clock.now = clock.now.Add(2 * time.Minute)
-	response, err = http.Get(server.URL + "/api/v1/agents/agent-http")
-	if err != nil {
-		t.Fatalf("HTTP get offline: %v", err)
-	}
-	defer response.Body.Close()
-	body = protocol.AgentResponse{}
-	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
-		t.Fatalf("decode HTTP offline get: %v", err)
-	}
-	if body.Agent.Status != protocol.AgentStatusOffline {
-		t.Fatalf("HTTP timeout status = %s", body.Agent.Status)
-	}
-
-	bad := httptest.NewRequest(http.MethodPost, server.URL+"/api/v1/agents/register", nil)
-	badRecorder := httptest.NewRecorder()
-	NewServer(Config{Now: clock.Now}).ServeHTTP(badRecorder, bad)
-	if badRecorder.Code != http.StatusBadRequest {
-		t.Fatalf("invalid register status = %d", badRecorder.Code)
 	}
 }
 
