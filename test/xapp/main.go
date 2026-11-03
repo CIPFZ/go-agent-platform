@@ -37,6 +37,7 @@ func main() {
 	color := flag.String("color", "3366cc", "background RRGGBB")
 	events := flag.String("events", "", "JSON lines event log")
 	ready := flag.String("ready", "", "file created once the window is mapped")
+	pattern := flag.Bool("pattern", false, "paint desktop-like busy content (gradients and text-like noise) instead of a solid colour")
 	flag.Parse()
 
 	xgb.Logger = log.New(io.Discard, "", 0)
@@ -96,6 +97,10 @@ func main() {
 			return
 		}
 		switch e := ev.(type) {
+		case xproto.ExposeEvent:
+			if *pattern && e.Count == 0 {
+				paint(c, wid, *w, *h)
+			}
 		case xproto.MapNotifyEvent:
 			if *ready != "" {
 				os.WriteFile(*ready, []byte(fmt.Sprint(wid)), 0o644)
@@ -140,4 +145,47 @@ func (k keymap) keysym(kc xproto.Keycode, state uint16) uint32 {
 		return uint32(k.syms[base+1])
 	}
 	return uint32(k.syms[base])
+}
+
+// paint draws content with the statistics of a busy desktop: horizontal
+// colour gradients with "windows" of dark, text-like glyph noise on light
+// backgrounds. Rectangles are grouped per colour so each colour costs one
+// ChangeGC and a few PolyFillRectangle requests.
+func paint(c *xgb.Conn, wid xproto.Window, w, h int) {
+	gc, _ := xproto.NewGcontextId(c)
+	xproto.CreateGC(c, gc, xproto.Drawable(wid), 0, nil)
+	byColor := map[uint32][]xproto.Rectangle{}
+	add := func(col uint32, x, y, rw, rh int) {
+		byColor[col] = append(byColor[col], xproto.Rectangle{X: int16(x), Y: int16(y), Width: uint16(rw), Height: uint16(rh)})
+	}
+	for y := 0; y < h; y += 8 {
+		for x := 0; x < w; x += 16 {
+			r := uint32(x * 255 / max(w, 1))
+			g := uint32(y * 255 / max(h, 1))
+			add((r&0xf0)<<16|(g&0xf0)<<8|0xa0, x, y, 16, 8)
+		}
+	}
+	seed := uint32(12345)
+	rnd := func() uint32 { seed = seed*1664525 + 1013904223; return seed >> 8 }
+	for win := 0; win < 6; win++ {
+		x0, y0 := int(rnd()%uint32(max(w-640, 1))), int(rnd()%uint32(max(h-420, 1)))
+		add(0xf4f4f4, x0, y0, 640, 420)
+		for line := y0 + 10; line < y0+410; line += 16 {
+			for x := x0 + 8; x < x0+620; x += 3 {
+				if rnd()%3 == 0 {
+					shade := 0x20 + rnd()%0x60
+					add(shade<<16|shade<<8|shade, x, line+int(rnd()%6), 2, 2+int(rnd()%6))
+				}
+			}
+		}
+	}
+	for col, rects := range byColor {
+		xproto.ChangeGC(c, gc, xproto.GcForeground, []uint32{col})
+		for len(rects) > 0 {
+			n := min(len(rects), 8000)
+			xproto.PolyFillRectangle(c, xproto.Drawable(wid), gc, rects[:n])
+			rects = rects[n:]
+		}
+	}
+	xproto.GetInputFocus(c).Reply() // flush
 }
