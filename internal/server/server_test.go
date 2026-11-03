@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/CIPFZ/go-agent-platform/internal/async"
 	"github.com/CIPFZ/go-agent-platform/internal/audit"
 	"github.com/CIPFZ/go-agent-platform/internal/dedup"
 	"github.com/CIPFZ/go-agent-platform/internal/protocol"
@@ -62,7 +63,7 @@ func newHarness(t *testing.T, maxConcurrency int, extra ...*Route) *harness {
 			return map[string]int64{"n": h.calls.Add(1)}, nil
 		}},
 		{Method: "POST", Path: "/v1/slow", Action: "test.slow", Class: Retryable, Handler: func(c *Call) (any, error) {
-			return RunBlocking(c.Context(50*time.Millisecond), func() (any, error) {
+			return async.Run(c.Context(50*time.Millisecond), func() (any, error) {
 				time.Sleep(time.Second)
 				return nil, nil
 			})

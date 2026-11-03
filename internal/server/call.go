@@ -97,25 +97,3 @@ func (c *Call) release() {
 		cancel()
 	}
 }
-
-// RunBlocking runs fn on its own goroutine and abandons it when ctx ends
-// (spec section 7): the request answers with timeout while fn finishes in
-// the background through its own natural exit path.
-func RunBlocking[T any](ctx context.Context, fn func() (T, error)) (T, error) {
-	type outcome struct {
-		value T
-		err   error
-	}
-	done := make(chan outcome, 1)
-	go func() {
-		v, err := fn()
-		done <- outcome{v, err}
-	}()
-	select {
-	case o := <-done:
-		return o.value, o.err
-	case <-ctx.Done():
-		var zero T
-		return zero, ctx.Err()
-	}
-}
