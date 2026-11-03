@@ -66,6 +66,7 @@ func newEnv(t *testing.T, mutate ...func(*Deps)) *testEnv {
 		Audit:        e.audit,
 		Screen:       fakeScreen{},
 		Input:        &fakeInput{},
+		Window:       &fakeWindows{},
 		Session:      func() session.State { e.mu.Lock(); defer e.mu.Unlock(); return e.state },
 		DPIAwareness: "per_monitor_v2",
 	}

@@ -13,6 +13,7 @@ import (
 	"github.com/CIPFZ/go-agent-platform/internal/actions/input"
 	"github.com/CIPFZ/go-agent-platform/internal/actions/screen"
 	"github.com/CIPFZ/go-agent-platform/internal/actions/session"
+	"github.com/CIPFZ/go-agent-platform/internal/actions/window"
 	"github.com/CIPFZ/go-agent-platform/internal/audit"
 	"github.com/CIPFZ/go-agent-platform/internal/config"
 	"github.com/CIPFZ/go-agent-platform/internal/policy"
@@ -26,6 +27,7 @@ type Deps struct {
 	Audit        audit.Sink
 	Screen       screen.Backend
 	Input        input.Backend
+	Window       window.Backend
 	Session      func() session.State
 	DPIAwareness string
 	Policy       *policy.Policy
@@ -44,6 +46,7 @@ type API struct {
 
 	screen *screen.Service
 	input  *input.Service
+	window *window.Service
 
 	lastInput atomic.Pointer[time.Time]
 	statsMu   sync.Mutex
@@ -61,6 +64,7 @@ func New(cfg *config.Config, sink audit.Sink) (*API, error) {
 		Audit:        sink,
 		Screen:       screen.NewBackend(),
 		Input:        input.NewBackend(),
+		Window:       window.NewBackend(),
 		Session:      session.Detect,
 		DPIAwareness: session.InitDPIAwareness(),
 		Policy:       pol,
@@ -82,6 +86,7 @@ func NewWithDeps(d Deps) (*API, error) {
 		policy:  d.Policy,
 		screen:  screen.NewService(d.Screen),
 		input:   input.NewService(d.Input),
+		window:  window.NewService(d.Window),
 	}
 	return a, nil
 }
@@ -107,6 +112,7 @@ func (a *API) Routes() []*server.Route {
 		{Method: "GET", Path: "/v1/screen/cursor", Action: "screen.cursor", Class: server.Retryable, Handler: a.screenCursor},
 	}
 	r = append(r, a.inputRoutes()...)
+	r = append(r, a.windowRoutes()...)
 	return r
 }
 

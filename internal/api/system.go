@@ -82,7 +82,7 @@ func (a *API) capabilities(c *server.Call) (any, error) {
 func (a *API) actions(displayReady bool) []string {
 	var out []string
 	if displayReady {
-		out = append(out, "screen", "input")
+		out = append(out, "screen", "input", "window")
 	}
 	return out
 }
