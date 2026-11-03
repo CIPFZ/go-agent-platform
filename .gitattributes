@@ -1,0 +1,3 @@
+# Check out text with LF everywhere: tests compare generated documents byte
+# for byte, and Windows runners would otherwise convert them to CRLF.
+* text=auto eol=lf

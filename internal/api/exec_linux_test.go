@@ -44,13 +44,17 @@ func TestExecTimeoutKillsTree(t *testing.T) {
 	e := newEnv(t)
 	pidFile := filepath.Join(t.TempDir(), "pid")
 	start := time.Now()
-	r := e.call("POST", "/v1/exec", map[string]any{"argv": []string{"sh", "-c", "sleep 60 & echo $! >" + pidFile + "; wait"}}, protocol.HeaderTimeoutMS, "300")
+	// The timeout leaves the shell ample time to record its child first.
+	r := e.call("POST", "/v1/exec", map[string]any{"argv": []string{"sh", "-c", "sleep 60 & echo $! >" + pidFile + "; wait"}}, protocol.HeaderTimeoutMS, "1500")
 	r.code(t, protocol.CodeTimeout)
 	if r.Error.Retryable || time.Since(start) > 5*time.Second {
 		t.Fatalf("timeout = %+v after %s", r.Error, time.Since(start))
 	}
 	data, _ := os.ReadFile(pidFile)
 	pid := atoi(strings.TrimSpace(string(data)))
+	if pid <= 0 {
+		t.Fatalf("pid file = %q", data) // kill(0) would signal our own group
+	}
 	deadline := time.Now().Add(3 * time.Second)
 	for syscall.Kill(pid, 0) == nil && time.Now().Before(deadline) {
 		time.Sleep(20 * time.Millisecond)

@@ -67,7 +67,7 @@ func TestRunDefaultsCwdToHome(t *testing.T) {
 
 func TestRunCancelKillsWholeTree(t *testing.T) {
 	pidFile := filepath.Join(t.TempDir(), "child.pid")
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
 	defer cancel()
 	started := time.Now()
 	_, err := Run(ctx, Spec{Argv: []string{"sh", "-c", "sleep 30 & echo $! > " + pidFile + "; wait"}})
@@ -98,8 +98,8 @@ func assertGone(t *testing.T, pidFile string) {
 		t.Fatalf("read pid file: %v", err)
 	}
 	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil {
-		t.Fatalf("parse pid: %v", err)
+	if err != nil || pid <= 0 {
+		t.Fatalf("parse pid %q: %v", data, err)
 	}
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {

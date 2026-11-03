@@ -106,11 +106,18 @@ func TestBackoffAfterQuickExits(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- Run(ctx, o) }()
 	// Two quick exits trigger the (one hour) back-off, so no third start.
-	time.Sleep(500 * time.Millisecond)
+	starts := func() int {
+		data, _ := os.ReadFile(filepath.Join(dir, "starts"))
+		return strings.Count(string(data), "\n")
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for starts() < 2 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	time.Sleep(300 * time.Millisecond) // a third start would follow 10 ms later
 	cancel()
 	<-done
-	data, _ := os.ReadFile(filepath.Join(dir, "starts"))
-	if n := strings.Count(string(data), "\n"); n != 2 {
+	if n := starts(); n != 2 {
 		t.Fatalf("starts = %d, want 2 before back-off", n)
 	}
 }

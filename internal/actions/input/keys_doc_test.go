@@ -116,7 +116,7 @@ func TestKeysDocInSync(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read %s: %v (run with -update)", path, err)
 	}
-	if string(got) != want {
+	if strings.ReplaceAll(string(got), "\r\n", "\n") != want {
 		t.Fatalf("%s is out of date with keys.go; run go test ./internal/actions/input -run TestKeysDocInSync -update", path)
 	}
 }
