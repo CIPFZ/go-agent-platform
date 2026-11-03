@@ -57,7 +57,11 @@ func requireX(t *testing.T) {
 		agentBin = filepath.Join(binDir, "vm-agent")
 		xappBin = filepath.Join(binDir, "xapp")
 		for target, pkg := range map[string]string{agentBin: "../../cmd/vm-agent", xappBin: "../xapp"} {
-			out, err := exec.Command("go", "build", "-race", "-o", target, pkg).CombinedOutput()
+			args := []string{"build", "-o", target, pkg}
+			if os.Getenv("VM_AGENT_RACE") == "1" {
+				args = append([]string{"build", "-race"}, args[1:]...)
+			}
+			out, err := exec.Command("go", args...).CombinedOutput()
 			if err != nil {
 				buildErr = fmt.Errorf("build %s: %v\n%s", pkg, err, out)
 				return
