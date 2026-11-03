@@ -232,7 +232,16 @@ func (s *strip) writeBlock(b *block, q int, prevDC int32) int32 {
 	s.emitHuffRLE(2*q, 0, dc-prevDC)
 	h, runLength := 2*q+1, int32(0)
 	for zig := 1; zig < blockSize; zig++ {
-		ac := div(b[unzig[zig]], 8*int32(s.quant[q][zig]))
+		// Most AC coefficients quantise to zero. div(a, 8q) rounds to the
+		// nearest integer, so it is zero exactly when -4q < a < 4q; testing
+		// that first skips the division without changing any output.
+		a, d := b[unzig[zig]], 8*int32(s.quant[q][zig])
+		half := d >> 1
+		if a < half && a > -half {
+			runLength++
+			continue
+		}
+		ac := div(a, d)
 		if ac == 0 {
 			runLength++
 		} else {
