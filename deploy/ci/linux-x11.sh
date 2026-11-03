@@ -25,12 +25,15 @@ pids+=($!)
 sleep 1
 
 echo "== integration suite"
-VM_AGENT_INTEGRATION=1 go test -count=1 -v ./test/integration/ 2>&1 | tee "$WORK/integration.log" | grep -E '^(--- |PASS|FAIL|ok)' || true
-grep -q '^ok' "$WORK/integration.log" || { tail -50 "$WORK/integration.log"; exit 1; }
+VM_AGENT_INTEGRATION=1 deploy/ci/gotest.sh -count=1 -v ./test/integration/
 
 echo "== deploy/e2e.sh"
 go build -o "$WORK/vm-agent" ./cmd/vm-agent
 "$WORK/vm-agent" -listen 127.0.0.1:17070 -audit-log "$WORK/audit.jsonl" -job-dir "$WORK/jobs" -record-dir "$WORK/records" >"$WORK/agent.log" 2>&1 &
 pids+=($!)
 for _ in $(seq 1 50); do curl -fsS http://127.0.0.1:17070/v1/probe >/dev/null 2>&1 && break; sleep 0.1; done
-AGENT_URL=http://127.0.0.1:17070 deploy/e2e.sh || { cat "$WORK/agent.log"; exit 1; }
+if ! AGENT_URL=http://127.0.0.1:17070 deploy/e2e.sh 2>"$WORK/e2e.err"; then
+	cat "$WORK/e2e.err" "$WORK/agent.log" >&2
+	[[ -n "${GITHUB_ACTIONS:-}" ]] && echo "::error title=deploy/e2e.sh failed::$(tr '\n' ' ' <"$WORK/e2e.err" | head -c 900)"
+	exit 1
+fi
