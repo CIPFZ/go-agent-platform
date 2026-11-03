@@ -24,6 +24,6 @@ jobs:
       - name: Vet
         run: go vet ./...
       - name: Build
-        run: go build ./cmd/gateway ./cmd/guest-agent
+        run: go build ./...
       - name: Gateway benchmark smoke test
         run: go test ./internal/gateway -run '^$' -bench BenchmarkTaskStorePull -benchtime=1s -benchmem
