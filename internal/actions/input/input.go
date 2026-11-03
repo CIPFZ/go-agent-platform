@@ -64,6 +64,10 @@ const (
 	minStepPixels   = 2
 	DefaultDragMS   = 300
 	DefaultTypeMS   = 5
+	// clickHold is how long a click keeps the button down. Window managers
+	// that grab buttons for click-to-focus and replay them (openbox, mutter)
+	// can drop a press and release that arrive in the same instant.
+	clickHold = 10 * time.Millisecond
 )
 
 // Service serialises input through one backend.
@@ -212,6 +216,9 @@ func (x *Exec) Click(ctx context.Context, at *Point, btn Button, count int) erro
 			return err
 		}
 		if err := x.pressButton(btn); err != nil {
+			return err
+		}
+		if err := x.s.sleep(ctx, clickHold); err != nil {
 			return err
 		}
 		if err := x.releaseButton(btn); err != nil {
