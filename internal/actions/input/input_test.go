@@ -73,6 +73,7 @@ func newTestService() (*Service, *recorder) {
 	rec := &recorder{}
 	s := NewService(rec)
 	s.sleep = func(ctx context.Context, d time.Duration) error { return ctx.Err() } // no real waiting
+	s.hold = func(time.Duration) {}
 	return s, rec
 }
 

@@ -75,11 +75,12 @@ type Service struct {
 	backend Backend
 	queue   chan struct{}
 	sleep   func(ctx context.Context, d time.Duration) error
+	hold    func(d time.Duration)
 }
 
 // NewService returns a Service over b.
 func NewService(b Backend) *Service {
-	return &Service{backend: b, queue: make(chan struct{}, 1), sleep: sleepCtx}
+	return &Service{backend: b, queue: make(chan struct{}, 1), sleep: sleepCtx, hold: time.Sleep}
 }
 
 func sleepCtx(ctx context.Context, d time.Duration) error {
@@ -218,9 +219,9 @@ func (x *Exec) Click(ctx context.Context, at *Point, btn Button, count int) erro
 		if err := x.pressButton(btn); err != nil {
 			return err
 		}
-		if err := x.s.sleep(ctx, clickHold); err != nil {
-			return err
-		}
+		// Not cancellable: once the press is out the click completes, so a
+		// batch interrupted here still counts it as executed.
+		x.s.hold(clickHold)
 		if err := x.releaseButton(btn); err != nil {
 			return err
 		}
