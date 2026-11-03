@@ -1,3 +1,5 @@
+//go:build legacy
+
 package gateway
 
 import (
@@ -10,7 +12,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/CIPFZ/go-agent-platform/internal/protocol"
+	"github.com/CIPFZ/go-agent-platform/legacy/internal/protocol"
 )
 
 func (s *Server) handleArtifactDownload(writer http.ResponseWriter, request *http.Request, taskID, artifactID string) {

@@ -1,3 +1,5 @@
+//go:build legacy
+
 package gateway
 
 import (
@@ -11,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CIPFZ/go-agent-platform/internal/protocol"
+	"github.com/CIPFZ/go-agent-platform/legacy/internal/protocol"
 )
 
 func BenchmarkHTTPHealthz(b *testing.B) {

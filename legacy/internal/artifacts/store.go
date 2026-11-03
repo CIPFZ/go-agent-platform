@@ -1,3 +1,5 @@
+//go:build legacy
+
 // Package artifacts provides durable storage for task artifact payloads.
 package artifacts
 

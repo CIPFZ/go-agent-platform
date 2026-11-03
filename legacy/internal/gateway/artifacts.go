@@ -1,3 +1,5 @@
+//go:build legacy
+
 package gateway
 
 import (
@@ -7,7 +9,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/CIPFZ/go-agent-platform/internal/protocol"
+	"github.com/CIPFZ/go-agent-platform/legacy/internal/protocol"
 )
 
 // Validate and normalize before writing anything. Storage keys are scoped to

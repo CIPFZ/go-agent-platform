@@ -1,3 +1,5 @@
+//go:build legacy
+
 package gateway
 
 import (
@@ -13,8 +15,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/CIPFZ/go-agent-platform/internal/artifacts"
-	"github.com/CIPFZ/go-agent-platform/internal/protocol"
+	"github.com/CIPFZ/go-agent-platform/legacy/internal/artifacts"
+	"github.com/CIPFZ/go-agent-platform/legacy/internal/protocol"
 )
 
 var (

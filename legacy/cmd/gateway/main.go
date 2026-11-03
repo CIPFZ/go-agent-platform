@@ -1,3 +1,5 @@
+//go:build legacy
+
 package main
 
 import (
@@ -10,10 +12,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/CIPFZ/go-agent-platform/internal/artifacts"
 	"github.com/CIPFZ/go-agent-platform/internal/audit"
-	"github.com/CIPFZ/go-agent-platform/internal/gateway"
 	"github.com/CIPFZ/go-agent-platform/internal/tlsreload"
+	"github.com/CIPFZ/go-agent-platform/legacy/internal/artifacts"
+	"github.com/CIPFZ/go-agent-platform/legacy/internal/gateway"
 )
 
 func main() {
