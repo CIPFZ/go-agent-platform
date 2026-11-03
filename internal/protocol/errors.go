@@ -71,6 +71,7 @@ const (
 	// ReasonClientDisconnected marks a request whose caller went away before
 	// it finished; it is what a deduplicated retry replays.
 	ReasonClientDisconnected = "client_disconnected"
+	ReasonSHA256Mismatch     = "sha256_mismatch"
 )
 
 // Error is the error object of an error response (spec section 5.4).

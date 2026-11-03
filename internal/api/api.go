@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/CIPFZ/go-agent-platform/internal/actions/file"
 	"github.com/CIPFZ/go-agent-platform/internal/actions/input"
 	"github.com/CIPFZ/go-agent-platform/internal/actions/process"
 	"github.com/CIPFZ/go-agent-platform/internal/actions/screen"
@@ -50,6 +51,7 @@ type API struct {
 	screen *screen.Service
 	input  *input.Service
 	window *window.Service
+	files  *file.FS
 
 	lastInput atomic.Pointer[time.Time]
 	statsMu   sync.Mutex
@@ -88,6 +90,10 @@ func NewWithDeps(d Deps) (*API, error) {
 	if d.Now == nil {
 		d.Now = time.Now
 	}
+	files, err := file.New(d.Config.Roots)
+	if err != nil {
+		return nil, err
+	}
 	a := &API{
 		cfg:     d.Config,
 		audit:   d.Audit,
@@ -99,6 +105,7 @@ func NewWithDeps(d Deps) (*API, error) {
 		screen:  screen.NewService(d.Screen),
 		input:   input.NewService(d.Input),
 		window:  window.NewService(d.Window),
+		files:   files,
 	}
 	return a, nil
 }
@@ -126,6 +133,7 @@ func (a *API) Routes() []*server.Route {
 	r = append(r, a.inputRoutes()...)
 	r = append(r, a.windowRoutes()...)
 	r = append(r, a.processRoutes()...)
+	r = append(r, a.fileRoutes()...)
 	return r
 }
 
