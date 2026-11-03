@@ -67,6 +67,10 @@ const (
 	ReasonOutsideRoot       = "outside_root"
 	ReasonRegionOutOfBounds = "region_out_of_bounds"
 	ReasonUnknownKey        = "unknown_key"
+	ReasonPermissionDenied  = "permission_denied"
+	// ReasonClientDisconnected marks a request whose caller went away before
+	// it finished; it is what a deduplicated retry replays.
+	ReasonClientDisconnected = "client_disconnected"
 )
 
 // Error is the error object of an error response (spec section 5.4).
