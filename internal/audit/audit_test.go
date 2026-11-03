@@ -48,3 +48,41 @@ func TestFileSinkWritesJSONLines(t *testing.T) {
 		t.Fatalf("audit event = %+v", event)
 	}
 }
+
+func TestFileSinkRotatesBySizeAndKeepsMaxFiles(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	sink, err := NewRotatingFileSink(path, 400, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 40; i++ {
+		sink.Record(Event{Kind: "request", RequestID: "request-id-0000000000", Action: "input.mouse.click", Code: "ok"})
+		if err := sink.LastError(); err != nil {
+			t.Fatalf("record %d: %v", i, err)
+		}
+	}
+	for _, name := range []string{path, path + ".1", path + ".2"} {
+		info, err := os.Stat(name)
+		if err != nil {
+			t.Fatalf("expected %s: %v", name, err)
+		}
+		if info.Size() > 400 {
+			t.Fatalf("%s is %d bytes, over the 400 byte limit", name, info.Size())
+		}
+	}
+	if _, err := os.Stat(path + ".3"); !os.IsNotExist(err) {
+		t.Fatalf("more than 3 files kept: %v", err)
+	}
+}
+
+func TestFileSinkResumesSizeOfExistingFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	if err := os.WriteFile(path, make([]byte, 390), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sink, _ := NewRotatingFileSink(path, 400, 2)
+	sink.Record(Event{Kind: "startup"})
+	if _, err := os.Stat(path + ".1"); err != nil {
+		t.Fatalf("pre-existing content not counted toward rotation: %v", err)
+	}
+}
