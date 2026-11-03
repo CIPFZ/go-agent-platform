@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/CIPFZ/go-agent-platform/internal/actions/input"
 	"github.com/CIPFZ/go-agent-platform/internal/actions/screen"
 	"github.com/CIPFZ/go-agent-platform/internal/actions/session"
 	"github.com/CIPFZ/go-agent-platform/internal/audit"
@@ -24,6 +25,7 @@ type Deps struct {
 	Config       *config.Config
 	Audit        audit.Sink
 	Screen       screen.Backend
+	Input        input.Backend
 	Session      func() session.State
 	DPIAwareness string
 	Policy       *policy.Policy
@@ -41,6 +43,7 @@ type API struct {
 	policy  *policy.Policy
 
 	screen *screen.Service
+	input  *input.Service
 
 	lastInput atomic.Pointer[time.Time]
 	statsMu   sync.Mutex
@@ -57,6 +60,7 @@ func New(cfg *config.Config, sink audit.Sink) (*API, error) {
 		Config:       cfg,
 		Audit:        sink,
 		Screen:       screen.NewBackend(),
+		Input:        input.NewBackend(),
 		Session:      session.Detect,
 		DPIAwareness: session.InitDPIAwareness(),
 		Policy:       pol,
@@ -77,6 +81,7 @@ func NewWithDeps(d Deps) (*API, error) {
 		dpi:     d.DPIAwareness,
 		policy:  d.Policy,
 		screen:  screen.NewService(d.Screen),
+		input:   input.NewService(d.Input),
 	}
 	return a, nil
 }
@@ -101,6 +106,7 @@ func (a *API) Routes() []*server.Route {
 		{Method: "GET", Path: "/v1/screen/info", Action: "screen.info", Class: server.Retryable, Handler: a.screenInfo},
 		{Method: "GET", Path: "/v1/screen/cursor", Action: "screen.cursor", Class: server.Retryable, Handler: a.screenCursor},
 	}
+	r = append(r, a.inputRoutes()...)
 	return r
 }
 

@@ -1,6 +1,9 @@
 package protocol
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // DisplayStatus is the display block of probe and capabilities (spec 6.1, 9).
 type DisplayStatus struct {
@@ -81,4 +84,65 @@ type CaptureResult struct {
 	Cursor     Point     `json:"cursor"`
 	CapturedAt time.Time `json:"captured_at"`
 	SHA256     string    `json:"sha256"`
+}
+
+// Input request bodies (spec section 6.3). Optional fields are pointers so a
+// zero coordinate is distinguishable from an omitted one.
+type MouseMoveRequest struct {
+	X          *int `json:"x"`
+	Y          *int `json:"y"`
+	DurationMS *int `json:"duration_ms"`
+}
+
+type MouseClickRequest struct {
+	X      *int   `json:"x"`
+	Y      *int   `json:"y"`
+	Button string `json:"button"`
+	Count  *int   `json:"count"`
+}
+
+type MouseButtonRequest struct {
+	Button string `json:"button"`
+}
+
+type MouseDragRequest struct {
+	From       *Point `json:"from"`
+	To         *Point `json:"to"`
+	Button     string `json:"button"`
+	DurationMS *int   `json:"duration_ms"`
+}
+
+type MouseScrollRequest struct {
+	DX int `json:"dx"`
+	DY int `json:"dy"`
+}
+
+type KeyTypeRequest struct {
+	Text       string `json:"text"`
+	IntervalMS *int   `json:"interval_ms"`
+	Method     string `json:"method"`
+}
+
+type KeyRequest struct {
+	Key string `json:"key"`
+}
+
+type HotkeyRequest struct {
+	Keys []string `json:"keys"`
+}
+
+// WaitRequest is the batch-only "wait" step.
+type WaitRequest struct {
+	MS *int `json:"ms"`
+}
+
+// BatchRequest is the body of POST /v1/input/batch. Each action is an object
+// with "type", the parameters of that action and optional "delay_after_ms".
+type BatchRequest struct {
+	Actions []json.RawMessage `json:"actions"`
+}
+
+// BatchResult is the successful result of input/batch.
+type BatchResult struct {
+	Executed int `json:"executed"`
 }
