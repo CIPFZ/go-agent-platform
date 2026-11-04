@@ -124,6 +124,11 @@ jobs:
       - name: Unit tests
         shell: bash
         run: deploy/ci/gotest.sh ./...
+      - name: Install, upgrade and rollback scripts (Windows PowerShell 5.1)
+        shell: powershell
+        run: |
+          go build -o "$env:RUNNER_TEMP\vm-agent.exe" ./cmd/vm-agent
+          deploy/ci/windows-install.ps1 -Binary "$env:RUNNER_TEMP\vm-agent.exe"
 
   binaries:
     runs-on: ubuntu-24.04
