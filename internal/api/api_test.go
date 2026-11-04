@@ -303,3 +303,17 @@ func (f *fakeClipboard) WritePNG(_ context.Context, data []byte) error {
 	f.content = clipboard.Content{Formats: []string{"image/png"}, PNG: data}
 	return nil
 }
+
+func TestWaylandCapabilitiesKeepScreenAndInputOnly(t *testing.T) {
+	bin := t.TempDir() + "/ffmpeg"
+	e := newEnv(t, func(d *Deps) {
+		d.Wayland = true
+		d.FFmpeg = bin
+		d.A11yAvailable = func() bool { return true }
+	})
+	var caps protocol.CapabilitiesResult
+	e.call("GET", "/v1/capabilities", nil).into(t, &caps)
+	if got := strings.Join(caps.Actions, ","); got != "screen,input,exec,process,file" {
+		t.Fatalf("wayland actions = %s", got)
+	}
+}

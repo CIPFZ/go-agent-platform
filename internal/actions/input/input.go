@@ -49,6 +49,7 @@ type Key struct {
 	Scan   uint16 // Windows set-1 scan code
 	Ext    bool   // Windows extended-key flag
 	Keysym uint32 // X11 keysym
+	Evdev  uint16 // Linux evdev key code (Wayland input through uinput)
 }
 
 // NewBackend returns the backend for the current platform and session.

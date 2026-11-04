@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/CIPFZ/go-agent-platform/internal/platform/wayland"
 	"github.com/CIPFZ/go-agent-platform/internal/platform/x11"
 	"github.com/CIPFZ/go-agent-platform/internal/protocol"
 )
@@ -15,6 +16,9 @@ const grabberName = "x11grab"
 // grabArgs captures r with x11grab, translating API coordinates to the root
 // window (spec section 10). libx264 with yuv420p needs even dimensions.
 func grabArgs(fps int, r protocol.Rect) ([]string, error) {
+	if wayland.Active() {
+		return nil, protocol.Unsupported("screen recording is not available in a Wayland session")
+	}
 	c, err := x11.Shared()
 	if err != nil {
 		return nil, protocol.Errorf(protocol.CodeNoDisplay, "%v", err)

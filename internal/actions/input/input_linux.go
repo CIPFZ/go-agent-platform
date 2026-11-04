@@ -9,11 +9,17 @@ import (
 	"github.com/jezek/xgb/xproto"
 	"github.com/jezek/xgb/xtest"
 
+	"github.com/CIPFZ/go-agent-platform/internal/platform/wayland"
 	"github.com/CIPFZ/go-agent-platform/internal/platform/x11"
 	"github.com/CIPFZ/go-agent-platform/internal/protocol"
 )
 
-func newBackend() Backend { return &xtestBackend{} }
+func newBackend() Backend {
+	if wayland.Active() {
+		return &waylandBackend{}
+	}
+	return &xtestBackend{}
+}
 
 // X core event types used with XTest FakeInput.
 const (

@@ -10,6 +10,7 @@ import (
 
 	"github.com/godbus/dbus/v5"
 
+	"github.com/CIPFZ/go-agent-platform/internal/platform/wayland"
 	"github.com/CIPFZ/go-agent-platform/internal/platform/x11"
 )
 
@@ -18,7 +19,9 @@ const dbusTimeout = time.Second
 
 func detect() State {
 	st := State{Type: "console"}
-	if _, err := x11.Shared(); err == nil {
+	if wayland.Active() {
+		st.DisplayReady = wayland.SocketReady()
+	} else if _, err := x11.Shared(); err == nil {
 		st.DisplayReady = true
 	}
 	st.Locked = lockedHint()
@@ -27,6 +30,10 @@ func detect() State {
 	}
 	return st
 }
+
+// Wayland reports whether the session is Wayland, where only screen
+// capture and input are available (spec 13.3, as agreed).
+func Wayland() bool { return wayland.Active() }
 
 // Linux coordinates are always physical pixels; there is no DPI
 // virtualisation to opt out of.
@@ -109,3 +116,11 @@ func property(ctx context.Context, obj dbus.BusObject, iface, name string) (dbus
 	err := obj.CallWithContext(ctx, "org.freedesktop.DBus.Properties.Get", 0, iface, name).Store(&v)
 	return v, err
 }
+
+// SetStateDir tells the Wayland input fallback where its RemoteDesktop
+// restore token lives.
+func SetStateDir(dir string) { wayland.SetStateDir(dir) }
+
+// PortalSetup runs the one-time RemoteDesktop approval for Wayland input
+// and stores the restore token in dir; it returns the exit code.
+func PortalSetup(dir string) int { return wayland.SetupMain(dir) }

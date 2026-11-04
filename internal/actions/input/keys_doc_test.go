@@ -53,6 +53,7 @@ func renderKeysDoc() string {
 
 - Windows：通过 ` + "`SendInput`" + ` 发送虚拟键码（VK）并携带 set-1 扫描码；“扩展”列为是的键附带 ` + "`KEYEVENTF_EXTENDEDKEY`" + `。VK 与布局无关，因此字母、数字、标点键按物理位置（美式布局）命名。
 - Linux X11：通过 XTest 发送 keysym 对应的 keycode；当前布局中没有该 keysym 时临时绑定到空闲 keycode，请求结束后恢复。
+- Linux Wayland（阶段 3）：通过 uinput 虚拟设备发送 evdev 键码，由 compositor 按其键盘布局解释；evdev 键码按美式布局位置命名，与扫描码列相同的键见下表。
 - ` + "`key/type`" + ` 不使用本表：` + "`method=unicode`" + `（默认）在 Windows 用 ` + "`KEYEVENTF_UNICODE`" + `、在 Linux 用字符的 keysym（Latin-1 直接映射，其余为 ` + "`0x01000000 + 码点`" + `）；` + "`method=scancode`" + ` 仅支持可打印 ASCII、制表符与换行，按当前布局的物理键输入，用于不响应 Unicode 注入的程序。文本中的 ` + "`\\n`" + `（含 ` + "`\\r\\n`" + `）按 Enter，` + "`\\t`" + ` 按 Tab。
 
 注意：
@@ -64,7 +65,7 @@ func renderKeysDoc() string {
 `)
 	used := map[string]bool{}
 	for _, g := range keyGroups {
-		fmt.Fprintf(&b, "## %s\n\n| 键名 | Windows VK | 扫描码 | 扩展 | X keysym |\n| --- | --- | --- | --- | --- |\n", g.title)
+		fmt.Fprintf(&b, "## %s\n\n| 键名 | Windows VK | 扫描码 | 扩展 | X keysym | evdev |\n| --- | --- | --- | --- | --- | --- |\n", g.title)
 		for _, name := range KeyNames() {
 			if !g.match(name) || used[name] {
 				continue
@@ -75,7 +76,7 @@ func renderKeysDoc() string {
 			if k.Ext {
 				ext = "是"
 			}
-			fmt.Fprintf(&b, "| `%s` | 0x%02X | 0x%02X | %s | 0x%04x |\n", name, k.VK, k.Scan, ext, k.Keysym)
+			fmt.Fprintf(&b, "| `%s` | 0x%02X | 0x%02X | %s | 0x%04x | %d |\n", name, k.VK, k.Scan, ext, k.Keysym, k.Evdev)
 		}
 		b.WriteString("\n")
 	}

@@ -84,6 +84,27 @@ jobs:
       - name: Multi-display matrix on Xorg dummy
         run: deploy/ci/multi-display.sh
 
+  wayland:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Load uinput
+        run: sudo modprobe uinput
+      - name: Wayland screen and input in a privileged container
+        run: |
+          docker run --rm --privileged --network host -v /dev:/dev \
+            -v "$(go env GOROOT)":/usr/local/go:ro -v "$PWD":/src -w /src \
+            -e GITHUB_ACTIONS ubuntu:24.04 bash -c '
+              apt-get update -qq &&
+              DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+                ca-certificates git sway xdg-desktop-portal xdg-desktop-portal-wlr xdg-desktop-portal-gtk \
+                pipewire wev udev dbus procps >/dev/null &&
+              git config --global --add safe.directory /src &&
+              PATH=/usr/local/go/bin:$PATH deploy/ci/wayland.sh'
+
   windows:
     runs-on: windows-latest
     steps:

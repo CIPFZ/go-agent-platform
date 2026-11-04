@@ -103,7 +103,10 @@ paths:
       summary: Capture a display, the virtual desktop or a region
       description: |
         Retryable. Default timeout 5 s. With encoding=stream the body is the
-        raw image and metadata is in the X-Result-* headers.
+        raw image and metadata is in the X-Result-* headers. In a Wayland
+        session the image comes from the xdg-desktop-portal Screenshot
+        interface, the desktop is a single display, and the pointer is
+        neither drawn nor reported (cursor is 0,0).
       x-stream-request: {field: encoding, value: stream}
       parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
       requestBody:
@@ -158,6 +161,7 @@ paths:
       operationId: screenCursor
       tags: [screen]
       summary: Pointer position and visibility
+      description: unsupported in a Wayland session.
       parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
       responses:
         '200':
@@ -255,7 +259,12 @@ paths:
       operationId: keyType
       tags: [input]
       summary: Type text
-      description: Default timeout 5 s plus the typing time (characters x interval_ms).
+      description: |
+        Default timeout 5 s plus the typing time (characters x interval_ms).
+        In a Wayland session input goes through a uinput device and text is
+        limited to printable ASCII typed on a US layout (other characters
+        answer unsupported), unless the portal RemoteDesktop fallback is in
+        use.
       parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
       requestBody:
         required: true

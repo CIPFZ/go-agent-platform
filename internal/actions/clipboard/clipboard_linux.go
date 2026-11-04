@@ -10,11 +10,17 @@ import (
 	"github.com/jezek/xgb"
 	"github.com/jezek/xgb/xproto"
 
+	"github.com/CIPFZ/go-agent-platform/internal/platform/wayland"
 	"github.com/CIPFZ/go-agent-platform/internal/platform/x11"
 	"github.com/CIPFZ/go-agent-platform/internal/protocol"
 )
 
-func newBackend() Backend { return &selectionBackend{} }
+func newBackend() Backend {
+	if wayland.Active() {
+		return unsupportedBackend{"clipboard access is not available in a Wayland session"}
+	}
+	return &selectionBackend{}
+}
 
 // selectionBackend owns and requests the X CLIPBOARD selection in pure Go
 // (spec section 10). It uses its own X connection and an unmapped window,

@@ -4,6 +4,7 @@ package session
 
 import (
 	"golang.org/x/sys/windows/registry"
+	"os"
 
 	"github.com/CIPFZ/go-agent-platform/internal/platform/win"
 )
@@ -40,4 +41,16 @@ func uacPrompts() bool {
 		return true // the Windows default (5) prompts
 	}
 	return consent != 0
+}
+
+// Wayland is false on Windows.
+func Wayland() bool { return false }
+
+// SetStateDir has nothing to configure on Windows.
+func SetStateDir(string) {}
+
+// PortalSetup is only meaningful in a Linux Wayland session.
+func PortalSetup(string) int {
+	os.Stderr.WriteString("vm-agent: VM_AGENT_PORTAL_SETUP applies to Linux Wayland sessions only\n")
+	return 2
 }

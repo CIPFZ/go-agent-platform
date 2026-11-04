@@ -51,6 +51,8 @@ type Deps struct {
 	// ScreenOrigin returns the screen position of the API origin (X11 root
 	// coordinates of the primary monitor; 0,0 on Windows).
 	ScreenOrigin func(ctx context.Context) (int, int, error)
+	// Wayland limits the display actions to screen and input (spec 13.3).
+	Wayland bool
 	// Uploader is the optional object-storage uploader; nil disables it.
 	Uploader *upload.Uploader
 	// RecordGrabArgs overrides ffmpeg's input arguments (tests).
@@ -88,6 +90,8 @@ type API struct {
 	stopJanitor chan struct{}
 	janitorDone chan struct{}
 
+	wayland bool
+
 	// supervised is true when a -supervise parent started this process, so
 	// its pid is protected from process/kill.
 	supervised bool
@@ -104,6 +108,7 @@ func New(cfg *config.Config, sink audit.Sink) (*API, error) {
 	if err != nil {
 		return nil, err
 	}
+	session.SetStateDir(filepath.Dir(cfg.JobDir))
 	// Command trees left by a crashed previous run are terminated before
 	// serving (spec D4); the registry then tracks this run's trees.
 	treeDir := filepath.Join(cfg.JobDir, ".trees")
@@ -129,6 +134,7 @@ func New(cfg *config.Config, sink audit.Sink) (*API, error) {
 	return NewWithDeps(Deps{
 		FFmpeg:       ffmpeg,
 		Uploader:     uploader,
+		Wayland:      session.Wayland(),
 		Config:       cfg,
 		Audit:        sink,
 		Screen:       screen.NewBackend(),
@@ -181,6 +187,7 @@ func NewWithDeps(d Deps) (*API, error) {
 		jobs:       jobs,
 		recorder:   recorder,
 
+		wayland:       d.Wayland,
 		a11yAvailable: d.A11yAvailable,
 		a11yCollect:   d.A11yCollect,
 		screenOrigin:  d.ScreenOrigin,

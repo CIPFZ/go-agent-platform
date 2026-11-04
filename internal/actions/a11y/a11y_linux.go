@@ -13,6 +13,7 @@ import (
 
 	"github.com/godbus/dbus/v5"
 
+	"github.com/CIPFZ/go-agent-platform/internal/platform/wayland"
 	"github.com/CIPFZ/go-agent-platform/internal/protocol"
 )
 
@@ -23,6 +24,9 @@ type atspi struct{}
 // command re-executes vm-agent as the helper with the request in its
 // environment.
 func (atspi) command(req Request) (*exec.Cmd, error) {
+	if wayland.Active() {
+		return nil, protocol.Unsupported("accessibility trees are not available in a Wayland session")
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		return nil, err
@@ -47,7 +51,12 @@ const (
 )
 
 // Available reports whether an AT-SPI bus is reachable from the session.
+// In a Wayland session windows cannot be targeted, so it is unavailable
+// there (as agreed for phase 3).
 func Available() bool {
+	if wayland.Active() {
+		return false
+	}
 	conn, err := dbus.ConnectSessionBus()
 	if err != nil {
 		return false

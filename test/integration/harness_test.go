@@ -49,7 +49,15 @@ func requireX(t *testing.T) {
 	if os.Getenv("DISPLAY") == "" {
 		t.Fatal("VM_AGENT_INTEGRATION=1 requires DISPLAY")
 	}
-	buildOnce.Do(func() {
+	buildOnce.Do(requireXBuild)
+	if buildErr != nil {
+		t.Fatal(buildErr)
+	}
+}
+
+// requireXBuild builds vm-agent and the test X client once.
+func requireXBuild() {
+	{
 		binDir, buildErr = os.MkdirTemp("", "vm-agent-it-")
 		if buildErr != nil {
 			return
@@ -67,9 +75,6 @@ func requireX(t *testing.T) {
 				return
 			}
 		}
-	})
-	if buildErr != nil {
-		t.Fatal(buildErr)
 	}
 }
 

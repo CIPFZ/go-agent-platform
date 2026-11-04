@@ -1,22 +1,25 @@
 #!/bin/sh
-# Configure the desktop session preconditions of spec 4.2 on Linux X11:
-# no screen lock, no screensaver or display power management, no sleep, and
-# optionally automatic login into an X11 (not Wayland) GDM session.
+# Configure the desktop session preconditions of spec 4.2 on Linux: no
+# screen lock, no screensaver or display power management, no sleep, and
+# optionally automatic login into an X11 GDM session; or, with --wayland,
+# keep Wayland and let the logged-in user create the uinput device vm-agent
+# uses for input there (spec 13.3).
 #
 #   deploy/linux/preconditions.sh            # as the desktop user
-#   sudo deploy/linux/preconditions.sh --system [--autologin USER]
+#   sudo deploy/linux/preconditions.sh --system [--autologin USER] [--wayland]
 #
 # The user part uses gsettings (GNOME), xset and autostart entries; the
 # system part masks the sleep targets, edits the GDM configuration and
 # enables lingering for the user's systemd instance. vm-agent's probe
 # reports whether the result holds (session_locked, display.ready).
 set -eu
-system=0 autologin=
+system=0 autologin= wayland=0
 while [ $# -gt 0 ]; do
 	case $1 in
 	--system) system=1; shift ;;
 	--autologin) autologin=$2; shift 2 ;;
-	*) echo "usage: $0 [--system [--autologin USER]]" >&2; exit 2 ;;
+	--wayland) wayland=1; shift ;;
+	*) echo "usage: $0 [--system [--autologin USER] [--wayland]]" >&2; exit 2 ;;
 	esac
 done
 
@@ -27,15 +30,15 @@ if [ "$system" = 1 ]; then
 	for conf in /etc/gdm3/custom.conf /etc/gdm/custom.conf; do
 		[ -f "$conf" ] || continue
 		# X11 only in phase 1 and 2 (spec D6), plus optional auto login.
-		python3 - "$conf" "$autologin" <<'PY'
+		python3 - "$conf" "$autologin" "$wayland" <<'PY'
 import configparser, sys
-path, user = sys.argv[1], sys.argv[2]
+path, user, wayland = sys.argv[1], sys.argv[2], sys.argv[3] == "1"
 cfg = configparser.ConfigParser(strict=False, interpolation=None)
 cfg.optionxform = str
 cfg.read(path)
 if not cfg.has_section("daemon"):
     cfg.add_section("daemon")
-cfg.set("daemon", "WaylandEnable", "false")
+cfg.set("daemon", "WaylandEnable", "true" if wayland else "false")
 if user:
     cfg.set("daemon", "AutomaticLoginEnable", "true")
     cfg.set("daemon", "AutomaticLogin", user)
@@ -46,6 +49,18 @@ PY
 	done
 	if [ -n "$autologin" ]; then
 		loginctl enable-linger "$autologin"
+	fi
+	if [ "$wayland" = 1 ]; then
+		# uinput for Wayland input: loaded at boot, and writable by the user
+		# of the active local session only (logind's uaccess ACL), not by a
+		# group that could also read every input device.
+		echo uinput >/etc/modules-load.d/vm-agent-uinput.conf
+		modprobe uinput || true
+		cat >/etc/udev/rules.d/70-vm-agent-uinput.rules <<'RULE'
+KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"
+RULE
+		udevadm control --reload-rules && udevadm trigger --name-match=uinput || true
+		echo "preconditions: /dev/uinput is writable by the active session user"
 	fi
 	echo "preconditions: system settings applied"
 	exit 0

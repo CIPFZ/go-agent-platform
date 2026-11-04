@@ -8,11 +8,18 @@ import (
 
 	"github.com/jezek/xgb/xproto"
 
+	"github.com/CIPFZ/go-agent-platform/internal/platform/wayland"
 	"github.com/CIPFZ/go-agent-platform/internal/platform/x11"
 	"github.com/CIPFZ/go-agent-platform/internal/protocol"
 )
 
-func newBackend() Backend { return ewmhBackend{} }
+func newBackend() Backend {
+	if wayland.Active() {
+		// Wayland has no protocol for clients to manage other windows.
+		return unsupportedBackend{"window management is not available in a Wayland session"}
+	}
+	return ewmhBackend{}
+}
 
 // ewmhBackend manages windows through the EWMH hints of the running window
 // manager: _NET_CLIENT_LIST_STACKING for enumeration in Z order,

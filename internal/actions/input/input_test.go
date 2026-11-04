@@ -373,12 +373,23 @@ func TestKeyLookup(t *testing.T) {
 	if k, _ := LookupKey("f12"); k.VK != 0x7B || k.Keysym != 0xffc9 {
 		t.Errorf("f12 = %+v", k)
 	}
-	if k, _ := LookupKey("up"); !k.Ext || k.VK != 0x26 || k.Keysym != 0xff52 {
+	if k, _ := LookupKey("f13"); k.Evdev != 183 {
+		t.Errorf("f13 evdev = %d", k.Evdev)
+	}
+	if k, _ := LookupKey("a"); k.Evdev != 30 {
+		t.Errorf("a evdev = %d", k.Evdev)
+	}
+	if k, _ := LookupKey("up"); !k.Ext || k.VK != 0x26 || k.Keysym != 0xff52 || k.Evdev != 103 {
 		t.Errorf("up = %+v", k)
 	}
+	evdevSeen := map[uint16]string{}
 	for _, name := range KeyNames() {
 		k := keyTable[name]
-		if k.VK == 0 || k.Keysym == 0 || k.Scan == 0 {
+		if other, dup := evdevSeen[k.Evdev]; dup && !(name == "numpad_enter" || other == "numpad_enter") {
+			t.Errorf("evdev code %d shared by %s and %s", k.Evdev, name, other)
+		}
+		evdevSeen[k.Evdev] = name
+		if k.VK == 0 || k.Keysym == 0 || k.Scan == 0 || k.Evdev == 0 {
 			t.Errorf("incomplete key %+v", k)
 		}
 	}

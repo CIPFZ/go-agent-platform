@@ -9,11 +9,17 @@ import (
 	"github.com/jezek/xgb/xfixes"
 	"github.com/kbinani/screenshot"
 
+	"github.com/CIPFZ/go-agent-platform/internal/platform/wayland"
 	"github.com/CIPFZ/go-agent-platform/internal/platform/x11"
 	"github.com/CIPFZ/go-agent-platform/internal/protocol"
 )
 
-func newBackend() Backend { return x11Backend{} }
+func newBackend() Backend {
+	if wayland.Active() {
+		return waylandBackend{}
+	}
+	return x11Backend{}
+}
 
 // x11Backend captures through github.com/kbinani/screenshot (xgb GetImage,
 // MIT-SHM when available), whose coordinates are relative to the first

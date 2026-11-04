@@ -112,6 +112,28 @@ func buildKeys() map[string]Key {
 	add("media_prev", 0xB1, 0x10, true, 0x1008ff16)
 	add("media_stop", 0xB2, 0x24, true, 0x1008ff15)
 	add("media_play_pause", 0xB3, 0x22, true, 0x1008ff14)
+
+	// Evdev codes equal the set-1 scan codes for the base block; extended
+	// keys, F13-F24 and media keys have their own codes (linux/input-event-codes.h).
+	evdev := map[string]uint16{
+		"rctrl": 97, "ralt": 100, "win": 125, "rwin": 126,
+		"up": 103, "down": 108, "left": 105, "right": 106, "home": 102, "end": 107, "pageup": 104, "pagedown": 109,
+		"delete": 111, "insert": 110, "printscreen": 99, "pause": 119, "menu": 127, "numlock": 69,
+		"numpad_divide": 98, "numpad_enter": 96,
+		"volume_mute": 113, "volume_down": 114, "volume_up": 115,
+		"media_next": 163, "media_prev": 165, "media_stop": 166, "media_play_pause": 164,
+	}
+	for i := 13; i <= 24; i++ {
+		evdev["f"+itoa(i)] = uint16(183 + i - 13)
+	}
+	for name, k := range t {
+		if code, ok := evdev[name]; ok {
+			k.Evdev = code
+		} else {
+			k.Evdev = k.Scan
+		}
+		t[name] = k
+	}
 	return t
 }
 

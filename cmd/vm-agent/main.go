@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -39,6 +40,11 @@ func main() {
 	}
 	if cfg.Supervise {
 		os.Exit(supervise(cfg, os.Args[1:]))
+	}
+	// One-time approval of the portal RemoteDesktop fallback for Wayland
+	// input; the token is kept next to the lock file.
+	if os.Getenv("VM_AGENT_PORTAL_SETUP") == "1" {
+		os.Exit(session.PortalSetup(filepath.Dir(cfg.JobDir)))
 	}
 	// Spec 4.1: declare Per-Monitor V2 DPI awareness before anything else
 	// touches the desktop (no-op on Linux).

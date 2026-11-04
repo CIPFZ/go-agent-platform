@@ -85,12 +85,14 @@ func (a *API) actions(displayReady bool) []string {
 	for _, g := range []struct {
 		name    string
 		display bool
-	}{{"screen", true}, {"input", true}, {"window", true}, {"exec", false}, {"process", false}, {"file", false}, {"clipboard", true}, {"record", true}} {
-		if (displayReady || !g.display) && (g.name != "record" || a.recorder.Available()) {
+		wayland bool // available in a Wayland session
+	}{{"screen", true, true}, {"input", true, true}, {"window", true, false}, {"exec", false, true}, {"process", false, true},
+		{"file", false, true}, {"clipboard", true, false}, {"record", true, false}} {
+		if (displayReady || !g.display) && (g.wayland || !a.wayland) && (g.name != "record" || a.recorder.Available()) {
 			out = append(out, g.name)
 		}
 	}
-	if displayReady && a.a11yAvailable() {
+	if displayReady && !a.wayland && a.a11yAvailable() {
 		out = append(out, "a11y")
 	}
 	// The optional uploader is listed on its own: uploading finished

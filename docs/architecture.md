@@ -69,6 +69,9 @@
 | 打开 | 纯 Go 的 xdg-open 等价实现（shared-mime-info、mimeapps.list、desktop entry） | `ShellExecuteEx` |
 | 录屏 | ffmpeg x11grab + libx264 | ffmpeg gdigrab + libx264（`__COMPAT_LAYER=HighDpiAware`） |
 | 会话 | login1 `LockedHint`（godbus） | `OpenInputDesktop`、注册表 UAC、`WTSClientProtocolType` |
+| 无障碍 | vm-agent 以环境变量重新执行自身作为 AT-SPI helper 子进程 | 内嵌 PowerShell 脚本（UI Automation）子进程 |
+
+Wayland 会话（`WAYLAND_DISPLAY` 已设置且 `XDG_SESSION_TYPE=wayland` 或无 `DISPLAY`）由 `internal/platform/wayland` 接管屏幕与输入：截图走 portal Screenshot（结果的尺寸即桌面大小），输入走 `/dev/uinput` 上创建的虚拟绝对指针加键盘（evdev 键码，见 `keys.md`）；`/dev/uinput` 不可写且存有 RemoteDesktop restore token（`VM_AGENT_PORTAL_SETUP=1 vm-agent` 一次性人工批准后写入锁文件旁）时改用 portal RemoteDesktop。窗口、剪贴板、录屏与无障碍在 Wayland 下不提供。
 
 ## 生命周期
 
