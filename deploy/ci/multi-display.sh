@@ -17,5 +17,10 @@ xpid=$!
 trap '$sudo kill $xpid 2>/dev/null || true; rm -f "$log"' EXIT
 export DISPLAY=":$DISPLAY_NUM"
 for _ in $(seq 1 100); do xrandr >/dev/null 2>&1 && break; sleep 0.1; done
-xrandr >/dev/null || { cat "$log"; exit 1; }
+if ! xrandr >/dev/null; then
+	$sudo cat "$log" >"$log.copy" 2>/dev/null || true
+	deploy/ci/annotate.sh "Xorg dummy did not start" "$log.copy"
+	cat "$log.copy"
+	exit 1
+fi
 VM_AGENT_INTEGRATION=1 VM_AGENT_MULTIDISPLAY=1 deploy/ci/gotest.sh -count=1 -v -run 'TestMultiDisplayMatrix' ./test/integration/

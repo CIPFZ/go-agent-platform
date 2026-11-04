@@ -114,7 +114,9 @@ func (r remoteIface) CreateSession(sender dbus.Sender, opts map[string]dbus.Vari
 
 func (r remoteIface) SelectDevices(sender dbus.Sender, session dbus.ObjectPath, opts map[string]dbus.Variant) (dbus.ObjectPath, *dbus.Error) {
 	r.log("SelectDevices")
+	r.p.mu.Lock()
 	r.p.gotToken, _ = opts["restore_token"].Value().(string)
+	r.p.mu.Unlock()
 	return r.p.respond(sender, tok(opts), map[string]dbus.Variant{}), nil
 }
 
@@ -227,8 +229,11 @@ func TestRemoteDesktopNeedsAndRotatesToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(p.calls, ",") != "CreateSession,SelectDevices,SelectSources,Start" || p.gotToken != "token-1" {
-		t.Fatalf("calls %v token %q", p.calls, p.gotToken)
+	p.mu.Lock()
+	calls, gotToken := strings.Join(p.calls, ","), p.gotToken
+	p.mu.Unlock()
+	if calls != "CreateSession,SelectDevices,SelectSources,Start" || gotToken != "token-1" {
+		t.Fatalf("calls %v token %q", calls, gotToken)
 	}
 	if data, _ := os.ReadFile(TokenPath()); strings.TrimSpace(string(data)) != "token-2" {
 		t.Fatalf("token not rotated: %q", data)
