@@ -1247,7 +1247,7 @@ components:
         uac_prompt: {type: boolean}
     Limits:
       type: object
-      required: [json_body_max_bytes, multipart_max_bytes, exec_output_max_bytes, file_read_max_bytes, download_max_bytes, batch_max_actions, max_concurrency, sync_timeout_max_ms, transfer_timeout_max_ms]
+      required: [json_body_max_bytes, multipart_max_bytes, exec_output_max_bytes, file_read_max_bytes, download_max_bytes, batch_max_actions, max_concurrency, sync_timeout_max_ms, transfer_timeout_max_ms, a11y_max_depth, a11y_max_nodes]
       properties:
         json_body_max_bytes: {type: integer, format: int64}
         multipart_max_bytes: {type: integer, format: int64}
@@ -1258,6 +1258,8 @@ components:
         max_concurrency: {type: integer}
         sync_timeout_max_ms: {type: integer, format: int64}
         transfer_timeout_max_ms: {type: integer, format: int64}
+        a11y_max_depth: {type: integer, description: Largest max_depth a11y/tree accepts.}
+        a11y_max_nodes: {type: integer, description: Largest max_nodes a11y/tree accepts.}
     CapabilitiesResult:
       type: object
       required: [platform, version, display, session, actions, limits]

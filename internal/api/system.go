@@ -5,6 +5,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/CIPFZ/go-agent-platform/internal/actions/a11y"
 	"github.com/CIPFZ/go-agent-platform/internal/actions/exec"
 	"github.com/CIPFZ/go-agent-platform/internal/protocol"
 	"github.com/CIPFZ/go-agent-platform/internal/server"
@@ -87,6 +88,8 @@ func (a *API) capabilities(c *server.Call) (any, error) {
 			MaxConcurrency:       a.cfg.MaxConcurrency,
 			SyncTimeoutMaxMS:     server.SyncTimeoutMax.Milliseconds(),
 			TransferTimeoutMaxMS: server.TransferTimeout.Milliseconds(),
+			A11yMaxDepth:         a11y.MaxDepthCap,
+			A11yMaxNodes:         a11y.MaxNodesCap,
 		},
 	}, nil
 }

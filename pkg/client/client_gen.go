@@ -81,6 +81,10 @@ type Limits struct {
 	MaxConcurrency       int   `json:"max_concurrency"`
 	SyncTimeoutMaxMS     int64 `json:"sync_timeout_max_ms"`
 	TransferTimeoutMaxMS int64 `json:"transfer_timeout_max_ms"`
+	// Largest max_depth a11y/tree accepts.
+	A11yMaxDepth int `json:"a11y_max_depth"`
+	// Largest max_nodes a11y/tree accepts.
+	A11yMaxNodes int `json:"a11y_max_nodes"`
 }
 
 // CapabilitiesResult is the CapabilitiesResult schema.

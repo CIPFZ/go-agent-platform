@@ -192,6 +192,7 @@ func TestCapabilitiesLimits(t *testing.T) {
 		JSONBodyMaxBytes: 8388608, MultipartMaxBytes: 1073741824, ExecOutputMaxBytes: 67108864,
 		FileReadMaxBytes: 67108864, DownloadMaxBytes: 1073741824, BatchMaxActions: 200,
 		MaxConcurrency: 32, SyncTimeoutMaxMS: 600000, TransferTimeoutMaxMS: 3600000,
+		A11yMaxDepth: 100, A11yMaxNodes: 50000,
 	}
 	if caps.Limits != want || caps.Platform == "" || caps.Session.Type != "console" {
 		t.Fatalf("capabilities = %+v", caps)
