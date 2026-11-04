@@ -19,8 +19,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -247,4 +249,52 @@ func (c *Client) doStream(ctx context.Context, method, path string, query url.Va
 		size = v
 	}
 	return &StreamResponse{ContentType: resp.Header.Get("Content-Type"), Size: size, Header: resp.Header, Body: resp.Body}, nil
+}
+
+// UploadFile is one file for FileUpload.
+type UploadFile struct {
+	// Path is the absolute target path on the agent.
+	Path string
+	// Body supplies the content; it is read once.
+	Body io.Reader
+}
+
+func (c *Client) doMultipart(ctx context.Context, method, path string, files []UploadFile, options *UploadOptions, out any, opts []Option) error {
+	pr, pw := io.Pipe()
+	mw := multipart.NewWriter(pw)
+	go func() {
+		err := func() error {
+			if options != nil {
+				data, err := json.Marshal(options)
+				if err != nil {
+					return err
+				}
+				if err := mw.WriteField("options", string(data)); err != nil {
+					return err
+				}
+			}
+			for _, f := range files {
+				part, err := mw.CreateFormFile(f.Path, filepath.Base(f.Path))
+				if err != nil {
+					return err
+				}
+				if _, err := io.Copy(part, f.Body); err != nil {
+					return err
+				}
+			}
+			return mw.Close()
+		}()
+		pw.CloseWithError(err)
+	}()
+	req, o, err := c.newRequest(ctx, method, path, nil, pr, mw.FormDataContentType(), opts)
+	if err != nil {
+		pr.Close()
+		return err
+	}
+	resp, err := c.httpClient().Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	return decodeEnvelope(resp, o, out)
 }

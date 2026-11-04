@@ -34,3 +34,22 @@ type FileListRequest struct {
 	Recursive  bool   `json:"recursive"`
 	MaxEntries *int   `json:"max_entries"`
 }
+
+type FileRemoveRequest struct {
+	Path      string `json:"path"`
+	Recursive bool   `json:"recursive"`
+}
+
+type FileMoveRequest struct {
+	From      string `json:"from"`
+	To        string `json:"to"`
+	Overwrite bool   `json:"overwrite"`
+}
+
+type FileDownloadRequest struct {
+	URL      string            `json:"url"`
+	Path     string            `json:"path"`
+	MaxBytes *int64            `json:"max_bytes"`
+	Retries  *int              `json:"retries"`
+	Headers  map[string]string `json:"headers"`
+}

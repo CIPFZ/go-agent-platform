@@ -3,8 +3,11 @@
 package file
 
 import (
+	"errors"
 	"io/fs"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"golang.org/x/sys/windows"
 )
@@ -60,3 +63,8 @@ func KnownDirs() (map[string]string, error) {
 	}
 	return dirs, nil
 }
+
+// ERROR_NOT_SAME_DEVICE is what MoveFileEx reports across volumes.
+func isWindowsNotSameDevice(err error) bool { return errors.Is(err, windows.ERROR_NOT_SAME_DEVICE) }
+
+func samePath(a, b string) bool { return strings.EqualFold(filepath.Clean(a), filepath.Clean(b)) }

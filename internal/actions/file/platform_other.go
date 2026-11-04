@@ -27,3 +27,7 @@ func KnownDirs() (map[string]string, error) {
 		"downloads": filepath.Join(home, "Downloads"), "pictures": filepath.Join(home, "Pictures"), "temp": os.TempDir(),
 	}, nil
 }
+
+func isWindowsNotSameDevice(error) bool { return false }
+
+func samePath(a, b string) bool { return filepath.Clean(a) == filepath.Clean(b) }

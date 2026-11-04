@@ -2,8 +2,16 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"mime"
+	"mime/multipart"
+	"net/http"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/CIPFZ/go-agent-platform/internal/actions/file"
@@ -16,6 +24,7 @@ import (
 const (
 	timeoutFile     = 30 * time.Second
 	timeoutFileLong = 60 * time.Second // file/read and file/remove
+	timeoutTransfer = 10 * time.Minute // file/download and file/upload
 )
 
 func (a *API) fileRoutes() []*server.Route {
@@ -26,6 +35,11 @@ func (a *API) fileRoutes() []*server.Route {
 		{Method: "POST", Path: "/v1/file/list", Action: "file.list", Class: server.Retryable, Handler: a.fileList},
 		{Method: "POST", Path: "/v1/file/mkdir", Action: "file.mkdir", Class: server.NonRetryable, Handler: a.fileMkdir},
 		{Method: "GET", Path: "/v1/file/known_dirs", Action: "file.known_dirs", Class: server.Retryable, Handler: a.fileKnownDirs},
+		{Method: "POST", Path: "/v1/file/remove", Action: "file.remove", Class: server.NonRetryable, Handler: a.fileRemove},
+		{Method: "POST", Path: "/v1/file/move", Action: "file.move", Class: server.NonRetryable, Handler: a.fileMove},
+		{Method: "POST", Path: "/v1/file/copy", Action: "file.copy", Class: server.NonRetryable, Handler: a.fileCopy},
+		{Method: "POST", Path: "/v1/file/download", Action: "file.download", Class: server.NonRetryable, Transfer: true, Handler: a.fileDownload},
+		{Method: "POST", Path: "/v1/file/upload", Action: "file.upload", Class: server.NonRetryable, Transfer: true, Handler: a.fileUpload},
 	}
 }
 
@@ -144,4 +158,120 @@ func (a *API) fileMkdir(c *server.Call) (any, error) {
 
 func (a *API) fileKnownDirs(c *server.Call) (any, error) {
 	return async.Run(c.Context(timeoutSystem), file.KnownDirs)
+}
+
+func (a *API) fileRemove(c *server.Call) (any, error) {
+	var req protocol.FileRemoveRequest
+	if err := c.Decode(&req); err != nil {
+		return nil, err
+	}
+	p, err := a.path(c, "path", req.Path)
+	if err != nil {
+		return nil, err
+	}
+	if req.Recursive {
+		c.Param("recursive", "true")
+	}
+	_, err = async.Run(c.Context(timeoutFileLong), func() (struct{}, error) { return struct{}{}, a.files.Remove(p, req.Recursive) })
+	return protocol.Empty{}, err
+}
+
+func (a *API) fileMoveOrCopy(c *server.Call, op func(from, to string, overwrite bool) error) (any, error) {
+	var req protocol.FileMoveRequest
+	if err := c.Decode(&req); err != nil {
+		return nil, err
+	}
+	from, err := a.path(c, "from", req.From)
+	if err != nil {
+		return nil, err
+	}
+	to, err := a.path(c, "to", req.To)
+	if err != nil {
+		return nil, err
+	}
+	_, err = async.Run(c.Context(timeoutFile), func() (struct{}, error) { return struct{}{}, op(from, to, req.Overwrite) })
+	return protocol.Empty{}, err
+}
+
+func (a *API) fileMove(c *server.Call) (any, error) { return a.fileMoveOrCopy(c, a.files.Move) }
+func (a *API) fileCopy(c *server.Call) (any, error) { return a.fileMoveOrCopy(c, a.files.Copy) }
+
+func (a *API) fileDownload(c *server.Call) (any, error) {
+	var req protocol.FileDownloadRequest
+	if err := c.Decode(&req); err != nil {
+		return nil, err
+	}
+	c.Param("url", req.URL)
+	if err := file.ValidateDownloadURL(req.URL); err != nil {
+		return nil, err
+	}
+	p, err := a.path(c, "path", req.Path)
+	if err != nil {
+		return nil, err
+	}
+	dl := file.DownloadRequest{URL: req.URL, Path: p, MaxBytes: file.DownloadMax, Retries: file.DefaultRetries, Headers: req.Headers}
+	if req.MaxBytes != nil {
+		if *req.MaxBytes <= 0 || *req.MaxBytes > file.DownloadMax {
+			return nil, protocol.Errorf(protocol.CodeInvalidRequest, "max_bytes must be between 1 and %d", file.DownloadMax)
+		}
+		dl.MaxBytes = *req.MaxBytes
+	}
+	if req.Retries != nil {
+		if *req.Retries < 0 || *req.Retries > 10 {
+			return nil, protocol.Errorf(protocol.CodeInvalidRequest, "retries must be between 0 and 10")
+		}
+		dl.Retries = *req.Retries
+	}
+	if len(req.Headers) > 0 {
+		keys := make([]string, 0, len(req.Headers))
+		for k := range req.Headers {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		c.Param("header_keys", strings.Join(keys, ","))
+	}
+	res, err := a.files.Download(c.Context(timeoutTransfer), a.downloader, dl)
+	if err != nil {
+		return nil, err
+	}
+	c.Param("size", strconv.FormatInt(res.Size, 10))
+	return res, nil
+}
+
+func (a *API) fileUpload(c *server.Call) (any, error) {
+	ct := c.Request.Header.Get("Content-Type")
+	mediaType, params, err := mime.ParseMediaType(ct)
+	if err != nil || mediaType != "multipart/form-data" || params["boundary"] == "" {
+		return nil, protocol.Errorf(protocol.CodeInvalidRequest, "file/upload needs a multipart/form-data body")
+	}
+	ctx := c.Context(timeoutTransfer)
+	body := http.MaxBytesReader(c.Writer, c.Request.Body, server.MultipartBodyMax)
+	// Reads observe the deadline: closing the body unblocks a stalled read.
+	stop := context.AfterFunc(ctx, func() { _ = body.Close() })
+	defer stop()
+	results, err := a.files.Upload(multipart.NewReader(body, params["boundary"]), func(data []byte) (file.UploadOptions, error) {
+		var o file.UploadOptions
+		dec := json.NewDecoder(bytes.NewReader(data))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&o); err != nil {
+			return o, protocol.Errorf(protocol.CodeInvalidRequest, "invalid options part: %v", err).WithReason(protocol.ReasonInvalidJSON)
+		}
+		return o, nil
+	})
+	paths := make([]string, len(results))
+	for i, r := range results {
+		paths[i] = r.Path
+	}
+	c.Param("paths", strings.Join(paths, ","))
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) || strings.Contains(err.Error(), "request body too large") {
+			return nil, protocol.Errorf(protocol.CodeTooLarge, "multipart body exceeds %d bytes", server.MultipartBodyMax)
+		}
+		return nil, err
+	}
+	return map[string]any{"files": results}, nil
 }

@@ -572,6 +572,111 @@ paths:
                     properties: {result: {$ref: '#/components/schemas/KnownDirs'}}
         default: {$ref: '#/components/responses/Error'}
 
+  /v1/file/remove:
+    post:
+      operationId: fileRemove
+      tags: [file]
+      summary: Delete a file or directory
+      description: A non-empty directory needs recursive (conflict otherwise). Default timeout 60 s.
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/FileRemoveRequest'}}}
+      responses:
+        '200': {$ref: '#/components/responses/Empty'}
+        default: {$ref: '#/components/responses/Error'}
+
+  /v1/file/move:
+    post:
+      operationId: fileMove
+      tags: [file]
+      summary: Move or rename a file or directory
+      description: |
+        to is the new path, not a directory to move into. With overwrite an
+        existing destination (file or whole directory) is replaced. Across
+        volumes the tree is copied and then deleted.
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/FileMoveRequest'}}}
+      responses:
+        '200': {$ref: '#/components/responses/Empty'}
+        default: {$ref: '#/components/responses/Error'}
+
+  /v1/file/copy:
+    post:
+      operationId: fileCopy
+      tags: [file]
+      summary: Copy a file or directory tree
+      description: Same destination rules as file/move. Files are written atomically; symbolic links are copied as links.
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/FileMoveRequest'}}}
+      responses:
+        '200': {$ref: '#/components/responses/Empty'}
+        default: {$ref: '#/components/responses/Error'}
+
+  /v1/file/download:
+    post:
+      operationId: fileDownload
+      tags: [file]
+      summary: Download an http or https URL to a file
+      description: |
+        Follows at most 10 redirects; transport errors, 408, 429 and 5xx are
+        retried with backoff, all attempts sharing this request's timeout
+        (default 10 minutes, at most 1 hour). The file is published
+        atomically; an existing path is a conflict. Network access equals the
+        desktop user's; there is no address filtering.
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/FileDownloadRequest'}}}
+      responses:
+        '200':
+          description: Downloaded.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties: {result: {$ref: '#/components/schemas/FileWriteResult'}}
+        default: {$ref: '#/components/responses/Error'}
+
+  /v1/file/upload:
+    post:
+      operationId: fileUpload
+      tags: [file]
+      summary: Upload files with multipart/form-data (up to 1 GiB)
+      description: |
+        Each file part's form name is the absolute target path. An optional
+        part named "options" with a JSON object {overwrite, mkdir} applies to
+        every file and must come before the file parts. Files are streamed to
+        disk and each is published atomically; on a failure the files already
+        written stay. Default timeout 10 minutes, at most 1 hour.
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                options: {$ref: '#/components/schemas/UploadOptions'}
+              additionalProperties: {type: string, format: binary}
+      responses:
+        '200':
+          description: Uploaded files.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties: {result: {$ref: '#/components/schemas/UploadResult'}}
+        default: {$ref: '#/components/responses/Error'}
+
 components:
   parameters:
     RequestID:
@@ -1046,3 +1151,47 @@ components:
         downloads: {type: string}
         pictures: {type: string}
         temp: {type: string}
+    FileRemoveRequest:
+      type: object
+      required: [path]
+      properties:
+        path: {type: string}
+        recursive: {type: boolean, default: false}
+    FileMoveRequest:
+      type: object
+      required: [from, to]
+      properties:
+        from: {type: string}
+        to: {type: string}
+        overwrite: {type: boolean, default: false}
+    FileDownloadRequest:
+      type: object
+      required: [url, path]
+      properties:
+        url: {type: string, description: http or https only.}
+        path: {type: string}
+        max_bytes: {type: integer, format: int64, default: 1073741824, description: At most 1073741824; larger responses fail with too_large.}
+        retries: {type: integer, minimum: 0, maximum: 10, default: 3}
+        headers:
+          type: object
+          additionalProperties: {type: string}
+          description: Request headers; only their names are audited.
+    UploadOptions:
+      type: object
+      properties:
+        overwrite: {type: boolean, default: false}
+        mkdir: {type: boolean, default: false}
+    UploadedFile:
+      type: object
+      required: [path, size, sha256]
+      properties:
+        path: {type: string}
+        size: {type: integer, format: int64}
+        sha256: {type: string}
+    UploadResult:
+      type: object
+      required: [files]
+      properties:
+        files:
+          type: array
+          items: {$ref: '#/components/schemas/UploadedFile'}

@@ -48,10 +48,11 @@ type API struct {
 	dpi     string
 	policy  *policy.Policy
 
-	screen *screen.Service
-	input  *input.Service
-	window *window.Service
-	files  *file.FS
+	screen     *screen.Service
+	input      *input.Service
+	window     *window.Service
+	files      *file.FS
+	downloader *file.Downloader
 
 	lastInput atomic.Pointer[time.Time]
 	statsMu   sync.Mutex
@@ -106,6 +107,8 @@ func NewWithDeps(d Deps) (*API, error) {
 		input:   input.NewService(d.Input),
 		window:  window.NewService(d.Window),
 		files:   files,
+
+		downloader: file.NewDownloader(),
 	}
 	return a, nil
 }

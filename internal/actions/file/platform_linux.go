@@ -71,3 +71,7 @@ func KnownDirs() (map[string]string, error) {
 	}
 	return dirs, nil
 }
+
+func isWindowsNotSameDevice(error) bool { return false }
+
+func samePath(a, b string) bool { return filepath.Clean(a) == filepath.Clean(b) }

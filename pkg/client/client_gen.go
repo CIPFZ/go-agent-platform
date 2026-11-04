@@ -421,6 +421,54 @@ type KnownDirs struct {
 	Temp      string `json:"temp"`
 }
 
+// FileRemoveRequest is the FileRemoveRequest schema.
+type FileRemoveRequest struct {
+	Path string `json:"path"`
+	// Default false.
+	Recursive *bool `json:"recursive,omitempty"`
+}
+
+// FileMoveRequest is the FileMoveRequest schema.
+type FileMoveRequest struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+	// Default false.
+	Overwrite *bool `json:"overwrite,omitempty"`
+}
+
+// FileDownloadRequest is the FileDownloadRequest schema.
+type FileDownloadRequest struct {
+	// http or https only.
+	URL  string `json:"url"`
+	Path string `json:"path"`
+	// At most 1073741824; larger responses fail with too_large. Default 1073741824.
+	MaxBytes *int64 `json:"max_bytes,omitempty"`
+	// Default 3.
+	Retries *int `json:"retries,omitempty"`
+	// Request headers; only their names are audited.
+	Headers map[string]string `json:"headers,omitempty"`
+}
+
+// UploadOptions is the UploadOptions schema.
+type UploadOptions struct {
+	// Default false.
+	Overwrite *bool `json:"overwrite,omitempty"`
+	// Default false.
+	Mkdir *bool `json:"mkdir,omitempty"`
+}
+
+// UploadedFile is the UploadedFile schema.
+type UploadedFile struct {
+	Path   string `json:"path"`
+	Size   int64  `json:"size"`
+	SHA256 string `json:"sha256"`
+}
+
+// UploadResult is the UploadResult schema.
+type UploadResult struct {
+	Files []UploadedFile `json:"files"`
+}
+
 // Operation identifies one API endpoint.
 type Operation struct {
 	ID     string
@@ -460,6 +508,11 @@ var Operations = []Operation{
 	{ID: "fileList", Method: "POST", Path: "/v1/file/list"},
 	{ID: "fileMkdir", Method: "POST", Path: "/v1/file/mkdir"},
 	{ID: "fileKnownDirs", Method: "GET", Path: "/v1/file/known_dirs"},
+	{ID: "fileRemove", Method: "POST", Path: "/v1/file/remove"},
+	{ID: "fileMove", Method: "POST", Path: "/v1/file/move"},
+	{ID: "fileCopy", Method: "POST", Path: "/v1/file/copy"},
+	{ID: "fileDownload", Method: "POST", Path: "/v1/file/download"},
+	{ID: "fileUpload", Method: "POST", Path: "/v1/file/upload"},
 }
 
 // Probe calls GET /v1/probe: Service and desktop session health.
@@ -738,6 +791,59 @@ func (c *Client) FileMkdir(ctx context.Context, body *FilePathRequest, opts ...O
 func (c *Client) FileKnownDirs(ctx context.Context, opts ...Option) (*KnownDirs, error) {
 	var out KnownDirs
 	if err := c.do(ctx, "GET", "/v1/file/known_dirs", nil, nil, &out, opts); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// FileRemove calls POST /v1/file/remove: Delete a file or directory.
+//
+// A non-empty directory needs recursive (conflict otherwise). Default timeout 60 s.
+func (c *Client) FileRemove(ctx context.Context, body *FileRemoveRequest, opts ...Option) error {
+	return c.do(ctx, "POST", "/v1/file/remove", nil, body, nil, opts)
+}
+
+// FileMove calls POST /v1/file/move: Move or rename a file or directory.
+//
+// to is the new path, not a directory to move into. With overwrite an
+// existing destination (file or whole directory) is replaced. Across
+// volumes the tree is copied and then deleted.
+func (c *Client) FileMove(ctx context.Context, body *FileMoveRequest, opts ...Option) error {
+	return c.do(ctx, "POST", "/v1/file/move", nil, body, nil, opts)
+}
+
+// FileCopy calls POST /v1/file/copy: Copy a file or directory tree.
+//
+// Same destination rules as file/move. Files are written atomically; symbolic links are copied as links.
+func (c *Client) FileCopy(ctx context.Context, body *FileMoveRequest, opts ...Option) error {
+	return c.do(ctx, "POST", "/v1/file/copy", nil, body, nil, opts)
+}
+
+// FileDownload calls POST /v1/file/download: Download an http or https URL to a file.
+//
+// Follows at most 10 redirects; transport errors, 408, 429 and 5xx are
+// retried with backoff, all attempts sharing this request's timeout
+// (default 10 minutes, at most 1 hour). The file is published
+// atomically; an existing path is a conflict. Network access equals the
+// desktop user's; there is no address filtering.
+func (c *Client) FileDownload(ctx context.Context, body *FileDownloadRequest, opts ...Option) (*FileWriteResult, error) {
+	var out FileWriteResult
+	if err := c.do(ctx, "POST", "/v1/file/download", nil, body, &out, opts); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// FileUpload calls POST /v1/file/upload: Upload files with multipart/form-data (up to 1 GiB).
+//
+// Each file part's form name is the absolute target path. An optional
+// part named "options" with a JSON object {overwrite, mkdir} applies to
+// every file and must come before the file parts. Files are streamed to
+// disk and each is published atomically; on a failure the files already
+// written stay. Default timeout 10 minutes, at most 1 hour.
+func (c *Client) FileUpload(ctx context.Context, files []UploadFile, options *UploadOptions, opts ...Option) (*UploadResult, error) {
+	var out UploadResult
+	if err := c.doMultipart(ctx, "POST", "/v1/file/upload", files, options, &out, opts); err != nil {
 		return nil, err
 	}
 	return &out, nil
