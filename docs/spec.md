@@ -355,9 +355,9 @@ Windows 前台激活顺序：`ShowWindow(SW_RESTORE)` 若最小化；`SetForegro
 
 | 方法 | 路径 | 请求 | 响应 |
 | --- | --- | --- | --- |
-| POST | `/v1/a11y/tree` | `window_id` 可选、`max_depth` 默认 10、`max_nodes` 默认 5000 | 节点树：role、name、value、rect、state、children |
+| POST | `/v1/a11y/tree` | `window_id` 可选，省略时取前台窗口；`max_depth` 默认 10，取值 1 到 100；`max_nodes` 默认 5000，取值 1 到 50000 | 节点树：role、name、value、rect、state、children |
 
-在限时子进程中执行，默认 15 秒，超时返回 `timeout`。
+在限时子进程中执行，默认 15 秒，超时返回 `timeout`。`max_depth` 或 `max_nodes` 超出范围返回 `invalid_request`；两个上限在 `capabilities.limits` 中以 `a11y_max_depth`、`a11y_max_nodes` 上报（见第 9 节）。上限用于约束 helper 子进程的耗时与响应体大小。
 
 ## 7. 可靠性边界
 
@@ -415,11 +415,12 @@ VM 是隔离单元。`vm-agent` 以桌面用户身份运行，权限等同该用
   "limits": { "json_body_max_bytes": 8388608, "multipart_max_bytes": 1073741824,
               "exec_output_max_bytes": 67108864, "file_read_max_bytes": 67108864,
               "download_max_bytes": 1073741824, "batch_max_actions": 200,
-              "max_concurrency": 32, "sync_timeout_max_ms": 600000, "transfer_timeout_max_ms": 3600000 }
+              "max_concurrency": 32, "sync_timeout_max_ms": 600000, "transfer_timeout_max_ms": 3600000,
+              "a11y_max_depth": 100, "a11y_max_nodes": 50000 }
 }
 ```
 
-`sync_timeout_max_ms` 适用于除传输类以外的全部接口；`transfer_timeout_max_ms` 适用于 `file/download`、`file/upload`、`record/{id}` 下载。
+`sync_timeout_max_ms` 适用于除传输类以外的全部接口；`transfer_timeout_max_ms` 适用于 `file/download`、`file/upload`、`record/{id}` 下载。`a11y_max_depth`、`a11y_max_nodes` 是 `a11y/tree` 请求中 `max_depth`、`max_nodes` 的上限，与 `a11y` 是否在 `actions` 中无关，始终上报。
 
 无桌面会话或已锁屏时 `display.ready` 为 false，`actions` 不含 `screen`、`input`、`window`、`clipboard`、`record`，对应接口返回 `no_display`。
 
