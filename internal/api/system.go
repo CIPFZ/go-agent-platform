@@ -90,6 +90,9 @@ func (a *API) actions(displayReady bool) []string {
 			out = append(out, g.name)
 		}
 	}
+	if displayReady && a.a11yAvailable() {
+		out = append(out, "a11y")
+	}
 	// The optional uploader is listed on its own: uploading finished
 	// recordings needs neither the display nor ffmpeg.
 	if a.uploader != nil {

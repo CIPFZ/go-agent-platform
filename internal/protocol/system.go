@@ -194,3 +194,10 @@ type RecordStopRequest struct {
 type RecordUploadRequest struct {
 	Key string `json:"key"`
 }
+
+// A11yTreeRequest is the body of POST /v1/a11y/tree.
+type A11yTreeRequest struct {
+	WindowID string `json:"window_id"`
+	MaxDepth *int   `json:"max_depth"`
+	MaxNodes *int   `json:"max_nodes"`
+}

@@ -5,6 +5,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/CIPFZ/go-agent-platform/internal/actions/a11y"
 	"github.com/CIPFZ/go-agent-platform/internal/actions/clipboard"
 	"github.com/CIPFZ/go-agent-platform/internal/actions/exec"
 	"github.com/CIPFZ/go-agent-platform/internal/actions/file"
@@ -42,6 +44,13 @@ type Deps struct {
 	Clipboard clipboard.Backend
 	// FFmpeg is the resolved ffmpeg executable; empty disables recording.
 	FFmpeg string
+	// A11yAvailable and A11yCollect provide accessibility trees; nil means
+	// the platform implementation.
+	A11yAvailable func() bool
+	A11yCollect   func(ctx context.Context, r a11y.Request) (*a11y.Result, error)
+	// ScreenOrigin returns the screen position of the API origin (X11 root
+	// coordinates of the primary monitor; 0,0 on Windows).
+	ScreenOrigin func(ctx context.Context) (int, int, error)
 	// Uploader is the optional object-storage uploader; nil disables it.
 	Uploader *upload.Uploader
 	// RecordGrabArgs overrides ffmpeg's input arguments (tests).
@@ -70,7 +79,11 @@ type API struct {
 	downloader *file.Downloader
 	jobs       *exec.Jobs
 	recorder   *record.Recorder
-	uploader   *upload.Uploader
+
+	a11yAvailable func() bool
+	a11yCollect   func(ctx context.Context, r a11y.Request) (*a11y.Result, error)
+	screenOrigin  func(ctx context.Context) (int, int, error)
+	uploader      *upload.Uploader
 
 	stopJanitor chan struct{}
 	janitorDone chan struct{}
@@ -167,10 +180,23 @@ func NewWithDeps(d Deps) (*API, error) {
 		supervised: os.Getenv(supervisor.EnvSupervised) == "1",
 		jobs:       jobs,
 		recorder:   recorder,
-		uploader:   d.Uploader,
+
+		a11yAvailable: d.A11yAvailable,
+		a11yCollect:   d.A11yCollect,
+		screenOrigin:  d.ScreenOrigin,
+		uploader:      d.Uploader,
 
 		stopJanitor: make(chan struct{}),
 		janitorDone: make(chan struct{}),
+	}
+	if a.a11yAvailable == nil {
+		a.a11yAvailable = a11y.Available
+	}
+	if a.a11yCollect == nil {
+		a.a11yCollect = a11y.Collect
+	}
+	if a.screenOrigin == nil {
+		a.screenOrigin = platformOrigin
 	}
 	go a.janitor()
 	return a, nil
@@ -233,6 +259,7 @@ func (a *API) Routes() []*server.Route {
 	r = append(r, a.jobRoutes()...)
 	r = append(r, a.clipboardRoutes()...)
 	r = append(r, a.recordRoutes()...)
+	r = append(r, a.a11yRoutes()...)
 	r = append(r, a.fileRoutes()...)
 	return r
 }

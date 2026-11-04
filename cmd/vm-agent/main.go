@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/CIPFZ/go-agent-platform/internal/actions/a11y"
 	"github.com/CIPFZ/go-agent-platform/internal/actions/file"
 	"github.com/CIPFZ/go-agent-platform/internal/actions/session"
 	"github.com/CIPFZ/go-agent-platform/internal/api"
@@ -27,6 +28,11 @@ import (
 const shutdownGrace = 10 * time.Second
 
 func main() {
+	// The Linux accessibility helper is vm-agent re-executed with a request
+	// in its environment (spec 6.9: a time-limited child process).
+	if a11y.IsHelper() {
+		os.Exit(a11y.HelperMain())
+	}
 	cfg, err := config.Parse(os.Args[1:], os.Stderr)
 	if err != nil {
 		os.Exit(2)

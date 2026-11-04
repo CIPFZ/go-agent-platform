@@ -89,7 +89,7 @@ type CapabilitiesResult struct {
 	Version  string        `json:"version"`
 	Display  DisplayStatus `json:"display"`
 	Session  SessionStatus `json:"session"`
-	// Action groups in the order screen, input, window, exec, process, file, clipboard, record, record_upload; display groups (screen, input, window, clipboard, record) are absent while the display is not ready, record also without ffmpeg, record_upload without configured object storage.
+	// Action groups in the order screen, input, window, exec, process, file, clipboard, record, a11y, record_upload; display groups (screen, input, window, clipboard, record, a11y) are absent while the display is not ready, record also without ffmpeg, a11y without an accessibility provider, record_upload without configured object storage.
 	Actions []string `json:"actions"`
 	Limits  Limits   `json:"limits"`
 }
@@ -660,6 +660,42 @@ type RecordUploadResult struct {
 	SHA256 string `json:"sha256"`
 }
 
+// A11yTreeRequest is the A11yTreeRequest schema.
+type A11yTreeRequest struct {
+	// Defaults to the foreground window.
+	WindowID *string `json:"window_id,omitempty"`
+	// Default 10.
+	MaxDepth *int `json:"max_depth,omitempty"`
+	// Default 5000.
+	MaxNodes *int `json:"max_nodes,omitempty"`
+}
+
+// A11yNode is the A11yNode schema.
+type A11yNode struct {
+	Role string `json:"role"`
+	Name string `json:"name"`
+	// Text or value content
+	Value    *string    `json:"value,omitempty"`
+	Rect     *Rect      `json:"rect"`
+	State    []string   `json:"state"`
+	Children []A11yNode `json:"children"`
+}
+
+// A11yTarget is the A11yTarget schema.
+type A11yTarget struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	PID   int    `json:"pid"`
+}
+
+// A11yTreeResult is the A11yTreeResult schema.
+type A11yTreeResult struct {
+	Window    A11yTarget `json:"window"`
+	Root      A11yNode   `json:"root"`
+	Nodes     int        `json:"nodes"`
+	Truncated bool       `json:"truncated"`
+}
+
 // Operation identifies one API endpoint.
 type Operation struct {
 	ID     string
@@ -721,6 +757,7 @@ var Operations = []Operation{
 	{ID: "recordDownload", Method: "GET", Path: "/v1/record/{session_id}"},
 	{ID: "recordDelete", Method: "DELETE", Path: "/v1/record/{session_id}"},
 	{ID: "recordUpload", Method: "POST", Path: "/v1/record/{session_id}/upload"},
+	{ID: "a11yTree", Method: "POST", Path: "/v1/a11y/tree"},
 }
 
 // Probe calls GET /v1/probe: Service and desktop session health.
@@ -1272,6 +1309,28 @@ func (c *Client) RecordDelete(ctx context.Context, sessionID string, opts ...Opt
 func (c *Client) RecordUpload(ctx context.Context, sessionID string, body *RecordUploadRequest, opts ...Option) (*RecordUploadResult, error) {
 	var out RecordUploadResult
 	if err := c.do(ctx, "POST", strings.ReplaceAll("/v1/record/{session_id}/upload", "{session_id}", url.PathEscape(sessionID)), nil, body, &out, opts); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// A11yTree calls POST /v1/a11y/tree: Accessibility tree of a window (optional capability).
+//
+// Collected in a child process that is killed when the request times out
+// (default 15 s, retryable): UI Automation through Windows PowerShell,
+// AT-SPI over D-Bus on Linux. window_id defaults to the foreground
+// window. Roles are the platform role names in snake_case (Windows
+// control types such as button and list_item, AT-SPI roles such as
+// push_button and frame); state uses the shared names active, checked,
+// collapsed, editable, enabled, expanded, focusable, focused, modal,
+// multi_line, offscreen, pressed, read_only and selected. Rects are
+// physical pixels from the primary display's corner. Depth counts the
+// root as 1; truncated reports nodes left out by max_depth or
+// max_nodes. unsupported without an accessibility provider (the
+// capability a11y is then absent).
+func (c *Client) A11yTree(ctx context.Context, body *A11yTreeRequest, opts ...Option) (*A11yTreeResult, error) {
+	var out A11yTreeResult
+	if err := c.do(ctx, "POST", "/v1/a11y/tree", nil, body, &out, opts); err != nil {
 		return nil, err
 	}
 	return &out, nil

@@ -64,14 +64,16 @@ func newEnv(t *testing.T, mutate ...func(*Deps)) *testEnv {
 	}
 	e := &testEnv{t: t, audit: audit.NewMemorySink(1000), state: session.State{DisplayReady: true, Type: "console"}}
 	d := Deps{
-		Config:       cfg,
-		Audit:        e.audit,
-		Screen:       fakeScreen{},
-		Input:        &fakeInput{},
-		Window:       &fakeWindows{},
-		Clipboard:    &fakeClipboard{},
-		Session:      func() session.State { e.mu.Lock(); defer e.mu.Unlock(); return e.state },
-		DPIAwareness: "per_monitor_v2",
+		Config:    cfg,
+		Audit:     e.audit,
+		Screen:    fakeScreen{},
+		Input:     &fakeInput{},
+		Window:    &fakeWindows{},
+		Clipboard: &fakeClipboard{},
+		// No accessibility provider unless a test installs one.
+		A11yAvailable: func() bool { return false },
+		Session:       func() session.State { e.mu.Lock(); defer e.mu.Unlock(); return e.state },
+		DPIAwareness:  "per_monitor_v2",
 	}
 	for _, m := range mutate {
 		m(&d)

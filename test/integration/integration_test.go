@@ -44,7 +44,8 @@ func TestProbeAndCapabilitiesOnX11(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.TrimSuffix(strings.Join(caps.Actions, ","), ",record"); got != "screen,input,window,exec,process,file,clipboard" {
+	// record and a11y follow when ffmpeg and AT-SPI are available.
+	if got := strings.Join(caps.Actions, ","); !strings.HasPrefix(got, "screen,input,window,exec,process,file,clipboard") {
 		t.Fatalf("actions = %v", caps.Actions)
 	}
 }
