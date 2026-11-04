@@ -176,6 +176,7 @@ func (a *API) Routes() []*server.Route {
 	r := []*server.Route{
 		{Method: "GET", Path: "/v1/probe", Action: "probe", Class: server.Retryable, Handler: a.probe},
 		{Method: "GET", Path: "/v1/capabilities", Action: "capabilities", Class: server.Retryable, Handler: a.capabilities},
+		{Method: "GET", Path: "/v1/metrics", Action: "metrics", Class: server.Retryable, Handler: a.metrics},
 
 		{Method: "POST", Path: "/v1/screen/capture", Action: "screen.capture", Class: server.Retryable, Handler: a.screenCapture},
 		{Method: "GET", Path: "/v1/screen/info", Action: "screen.info", Class: server.Retryable, Handler: a.screenInfo},

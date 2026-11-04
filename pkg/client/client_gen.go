@@ -586,6 +586,7 @@ type Operation struct {
 var Operations = []Operation{
 	{ID: "probe", Method: "GET", Path: "/v1/probe"},
 	{ID: "capabilities", Method: "GET", Path: "/v1/capabilities"},
+	{ID: "metrics", Method: "GET", Path: "/v1/metrics"},
 	{ID: "screenCapture", Method: "POST", Path: "/v1/screen/capture"},
 	{ID: "screenInfo", Method: "GET", Path: "/v1/screen/info"},
 	{ID: "screenCursor", Method: "GET", Path: "/v1/screen/cursor"},
@@ -645,6 +646,18 @@ func (c *Client) Capabilities(ctx context.Context, opts ...Option) (*Capabilitie
 		return nil, err
 	}
 	return &out, nil
+}
+
+// Metrics calls GET /v1/metrics: Prometheus metrics.
+//
+// Text exposition format: vm_agent_requests_total and
+// vm_agent_errors_total by action and code,
+// vm_agent_request_duration_seconds histogram by action,
+// vm_agent_in_flight_requests, vm_agent_goroutines,
+// vm_agent_dedup_hits_total, vm_agent_dedup_in_flight_conflicts_total and
+// vm_agent_busy_rejections_total.
+func (c *Client) Metrics(ctx context.Context, opts ...Option) (*StreamResponse, error) {
+	return c.doStream(ctx, "GET", "/v1/metrics", nil, nil, opts)
 }
 
 // ScreenCapture calls POST /v1/screen/capture: Capture a display, the virtual desktop or a region.

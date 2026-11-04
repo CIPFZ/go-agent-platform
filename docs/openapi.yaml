@@ -72,6 +72,27 @@ paths:
                     properties: {result: {$ref: '#/components/schemas/CapabilitiesResult'}}
         default: {$ref: '#/components/responses/Error'}
 
+  /v1/metrics:
+    get:
+      operationId: metrics
+      tags: [system]
+      summary: Prometheus metrics
+      description: |
+        Text exposition format: vm_agent_requests_total and
+        vm_agent_errors_total by action and code,
+        vm_agent_request_duration_seconds histogram by action,
+        vm_agent_in_flight_requests, vm_agent_goroutines,
+        vm_agent_dedup_hits_total, vm_agent_dedup_in_flight_conflicts_total and
+        vm_agent_busy_rejections_total.
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      responses:
+        '200':
+          description: Metrics.
+          content:
+            text/plain:
+              schema: {type: string}
+        default: {$ref: '#/components/responses/Error'}
+
   /v1/screen/capture:
     post:
       operationId: screenCapture

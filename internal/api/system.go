@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"time"
 
@@ -93,3 +94,16 @@ const (
 	downloadMax     int64 = 1 << 30
 	batchMaxActions       = 200
 )
+
+func (a *API) metrics(c *server.Call) (any, error) {
+	_ = c.Context(timeoutSystem)
+	a.statsMu.Lock()
+	stats := a.stats
+	a.statsMu.Unlock()
+	if stats == nil {
+		return nil, protocol.Errorf(protocol.CodeInternal, "metrics are not connected")
+	}
+	var buf bytes.Buffer
+	stats.WritePrometheus(&buf)
+	return &server.Stream{ContentType: "text/plain; version=0.0.4; charset=utf-8", Size: int64(buf.Len()), Body: &buf}, nil
+}
