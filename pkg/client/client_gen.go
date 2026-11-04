@@ -793,7 +793,10 @@ func (c *Client) Metrics(ctx context.Context, opts ...Option) (*StreamResponse, 
 // ScreenCapture calls POST /v1/screen/capture: Capture a display, the virtual desktop or a region.
 //
 // Retryable. Default timeout 5 s. With encoding=stream the body is the
-// raw image and metadata is in the X-Result-* headers.
+// raw image and metadata is in the X-Result-* headers. In a Wayland
+// session the image comes from the xdg-desktop-portal Screenshot
+// interface, the desktop is a single display, and the pointer is
+// neither drawn nor reported (cursor is 0,0).
 func (c *Client) ScreenCapture(ctx context.Context, body *CaptureRequest, opts ...Option) (*CaptureResult, error) {
 	var out CaptureResult
 	if err := c.do(ctx, "POST", "/v1/screen/capture", nil, body, &out, opts); err != nil {
@@ -823,6 +826,8 @@ func (c *Client) ScreenInfo(ctx context.Context, opts ...Option) (*ScreenInfoRes
 }
 
 // ScreenCursor calls GET /v1/screen/cursor: Pointer position and visibility.
+//
+// unsupported in a Wayland session.
 func (c *Client) ScreenCursor(ctx context.Context, opts ...Option) (*Cursor, error) {
 	var out Cursor
 	if err := c.do(ctx, "GET", "/v1/screen/cursor", nil, nil, &out, opts); err != nil {
@@ -866,6 +871,10 @@ func (c *Client) MouseScroll(ctx context.Context, body *MouseScrollRequest, opts
 // KeyType calls POST /v1/input/key/type: Type text.
 //
 // Default timeout 5 s plus the typing time (characters x interval_ms).
+// In a Wayland session input goes through a uinput device and text is
+// limited to printable ASCII typed on a US layout (other characters
+// answer unsupported), unless the portal RemoteDesktop fallback is in
+// use.
 func (c *Client) KeyType(ctx context.Context, body *KeyTypeRequest, opts ...Option) error {
 	return c.do(ctx, "POST", "/v1/input/key/type", nil, body, nil, opts)
 }
