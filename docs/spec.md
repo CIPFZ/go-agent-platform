@@ -106,7 +106,7 @@ Windows 进程启动后首先调用 `SetProcessDpiAwarenessContext(DPI_AWARENESS
 
 ### 4.2 桌面会话前置条件
 
-以下条件任一不满足时，截图可能返回黑屏，输入可能无效。安装脚本负责设置，`probe` 负责检测并上报。
+以下条件任一不满足时，截图可能返回黑屏，输入可能无效。安装脚本负责设置，`probe` 负责检测并上报。portal RemoteDesktop 的批准必须由人在桌面上完成一次，脚本无法代为批准；这是 Wayland 的安全设计，因此 uinput 是首选通道，portal 只在已存有 restore token 时作为回退。
 
 | 条件 | Windows 设置 | Linux 设置 | probe 字段 |
 | --- | --- | --- | --- |
@@ -115,6 +115,7 @@ Windows 进程启动后首先调用 `SetProcessDpiAwarenessContext(DPI_AWARENESS
 | 无安全桌面 | UAC 设为不提示，或服务账户为管理员且 `ConsentPromptBehaviorAdmin=0` | 无 | `uac_prompt` |
 | 控制台会话 | 禁止 RDP 登录，或 RDP 断开后用 `tscon <id> /dest:console` 切回 | 无 | `session_type` 为 `console` 或 `rdp` |
 | 图形会话存在 | 用户已登录 | `DISPLAY` 可连接 | `display.ready` |
+| Wayland 输入通道（阶段 3） | 无 | 首选 uinput：`sudo deploy/linux/preconditions.sh --system --wayland` 开机加载 `uinput` 模块，并以 udev `uaccess` 规则把 `/dev/uinput` 只授予当前活动本地会话的用户。无法授予时改用 portal RemoteDesktop：在该会话中以桌面用户身份、用与服务相同的 `-job-dir` 执行一次 `VM_AGENT_PORTAL_SETUP=1 vm-agent -job-dir <目录>`，由人在合成器弹出的对话框中批准（最多等待 5 分钟），restore token 以 0600 权限写入 `-job-dir` 上级目录的 `wayland-remote-desktop.token`，之后服务无需再次批准；每次使用后 portal 返回的新 token 会替换旧 token。合成器不返回 token（不支持持久化批准）时该命令失败退出 | `capabilities.actions` 含 `input`；两者都不满足时 `input/*` 返回 `unsupported`，消息说明两种配置方式 |
 
 ### 4.3 启动参数
 
