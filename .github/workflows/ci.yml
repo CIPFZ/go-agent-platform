@@ -61,12 +61,6 @@ jobs:
 
   linux-x11:
     runs-on: ubuntu-24.04
-    # Temporary: five independent attempts to confirm the run 64 fix
-    # (a73899c); reverted in the next commit.
-    strategy:
-      fail-fast: false
-      matrix:
-        attempt: [1, 2, 3, 4, 5]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
