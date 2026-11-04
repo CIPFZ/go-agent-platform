@@ -449,6 +449,57 @@ paths:
                     properties: {result: {$ref: '#/components/schemas/OpenResult'}}
         default: {$ref: '#/components/responses/Error'}
 
+  /v1/process/list:
+    get:
+      operationId: processList
+      tags: [process]
+      summary: List processes
+      parameters:
+        - {$ref: '#/components/parameters/RequestID'}
+        - {$ref: '#/components/parameters/TimeoutMS'}
+        - name: name
+          in: query
+          description: Case-insensitive substring of the process name.
+          schema: {type: string}
+      responses:
+        '200':
+          description: Processes sorted by pid.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties: {result: {$ref: '#/components/schemas/ProcessListResult'}}
+        default: {$ref: '#/components/responses/Error'}
+
+  /v1/process/kill:
+    post:
+      operationId: processKill
+      tags: [process]
+      summary: Terminate a process, politely first
+      description: |
+        Linux sends SIGTERM, Windows posts WM_CLOSE to the process's visible
+        top-level windows (none: skipped); whatever is alive after grace_ms is
+        killed (SIGKILL, TerminateProcess). force skips the polite step, tree
+        applies to every descendant. vm-agent and its supervisor are refused.
+        Default timeout 10 s plus grace_ms.
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/KillRequest'}}}
+      responses:
+        '200':
+          description: Outcome.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties: {result: {$ref: '#/components/schemas/KillResult'}}
+        default: {$ref: '#/components/responses/Error'}
+
   /v1/file/read:
     post:
       operationId: fileRead
@@ -1195,3 +1246,42 @@ components:
         files:
           type: array
           items: {$ref: '#/components/schemas/UploadedFile'}
+    ProcessInfo:
+      type: object
+      required: [pid, ppid, name, exe, started_at]
+      properties:
+        pid: {type: integer}
+        ppid: {type: integer}
+        name: {type: string}
+        exe: {type: string, description: Full executable path; empty when not readable.}
+        started_at: {type: string, format: date-time, nullable: true}
+    ProcessListResult:
+      type: object
+      required: [processes]
+      properties:
+        processes:
+          type: array
+          items: {$ref: '#/components/schemas/ProcessInfo'}
+    KillRequest:
+      type: object
+      required: [pid]
+      properties:
+        pid: {type: integer}
+        tree: {type: boolean, default: false}
+        grace_ms: {type: integer, minimum: 0, maximum: 600000, default: 3000}
+        force: {type: boolean, default: false}
+    KillResult:
+      type: object
+      required: [pid, targets, graceful, forced, exited]
+      properties:
+        pid: {type: integer}
+        targets:
+          type: array
+          items: {type: integer}
+          description: The pid and, with tree, its descendants.
+        graceful: {type: boolean, description: Every target exited within the grace period.}
+        forced:
+          type: array
+          items: {type: integer}
+          description: Targets killed after the grace period.
+        exited: {type: boolean, description: No target remains.}

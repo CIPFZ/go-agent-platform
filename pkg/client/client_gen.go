@@ -469,6 +469,45 @@ type UploadResult struct {
 	Files []UploadedFile `json:"files"`
 }
 
+// ProcessInfo is the ProcessInfo schema.
+type ProcessInfo struct {
+	PID  int    `json:"pid"`
+	Ppid int    `json:"ppid"`
+	Name string `json:"name"`
+	// Full executable path; empty when not readable.
+	Exe       string     `json:"exe"`
+	StartedAt *time.Time `json:"started_at"`
+}
+
+// ProcessListResult is the ProcessListResult schema.
+type ProcessListResult struct {
+	Processes []ProcessInfo `json:"processes"`
+}
+
+// KillRequest is the KillRequest schema.
+type KillRequest struct {
+	PID int `json:"pid"`
+	// Default false.
+	Tree *bool `json:"tree,omitempty"`
+	// Default 3000.
+	GraceMS *int `json:"grace_ms,omitempty"`
+	// Default false.
+	Force *bool `json:"force,omitempty"`
+}
+
+// KillResult is the KillResult schema.
+type KillResult struct {
+	PID int `json:"pid"`
+	// The pid and, with tree, its descendants.
+	Targets []int `json:"targets"`
+	// Every target exited within the grace period.
+	Graceful bool `json:"graceful"`
+	// Targets killed after the grace period.
+	Forced []int `json:"forced"`
+	// No target remains.
+	Exited bool `json:"exited"`
+}
+
 // Operation identifies one API endpoint.
 type Operation struct {
 	ID     string
@@ -502,6 +541,8 @@ var Operations = []Operation{
 	{ID: "exec", Method: "POST", Path: "/v1/exec"},
 	{ID: "processLaunch", Method: "POST", Path: "/v1/process/launch"},
 	{ID: "processOpen", Method: "POST", Path: "/v1/process/open"},
+	{ID: "processList", Method: "GET", Path: "/v1/process/list"},
+	{ID: "processKill", Method: "POST", Path: "/v1/process/kill"},
 	{ID: "fileRead", Method: "POST", Path: "/v1/file/read"},
 	{ID: "fileWrite", Method: "POST", Path: "/v1/file/write"},
 	{ID: "fileStat", Method: "POST", Path: "/v1/file/stat"},
@@ -728,6 +769,41 @@ func (c *Client) ProcessLaunch(ctx context.Context, body *LaunchRequest, opts ..
 func (c *Client) ProcessOpen(ctx context.Context, body *OpenRequest, opts ...Option) (*OpenResult, error) {
 	var out OpenResult
 	if err := c.do(ctx, "POST", "/v1/process/open", nil, body, &out, opts); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ProcessListParams holds the query parameters of ProcessList.
+type ProcessListParams struct {
+	Name *string
+}
+
+// ProcessList calls GET /v1/process/list: List processes.
+func (c *Client) ProcessList(ctx context.Context, params *ProcessListParams, opts ...Option) (*ProcessListResult, error) {
+	q := url.Values{}
+	if params != nil {
+		if params.Name != nil {
+			q.Set("name", fmt.Sprint(*params.Name))
+		}
+	}
+	var out ProcessListResult
+	if err := c.do(ctx, "GET", "/v1/process/list", q, nil, &out, opts); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ProcessKill calls POST /v1/process/kill: Terminate a process, politely first.
+//
+// Linux sends SIGTERM, Windows posts WM_CLOSE to the process's visible
+// top-level windows (none: skipped); whatever is alive after grace_ms is
+// killed (SIGKILL, TerminateProcess). force skips the polite step, tree
+// applies to every descendant. vm-agent and its supervisor are refused.
+// Default timeout 10 s plus grace_ms.
+func (c *Client) ProcessKill(ctx context.Context, body *KillRequest, opts ...Option) (*KillResult, error) {
+	var out KillResult
+	if err := c.do(ctx, "POST", "/v1/process/kill", nil, body, &out, opts); err != nil {
 		return nil, err
 	}
 	return &out, nil

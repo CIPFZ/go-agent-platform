@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/url"
+	"os"
 	osexec "os/exec"
 	"path/filepath"
 	"sort"
@@ -33,7 +34,54 @@ func (a *API) processRoutes() []*server.Route {
 		{Method: "POST", Path: "/v1/exec", Action: "exec", Class: server.NonRetryable, Handler: a.exec},
 		{Method: "POST", Path: "/v1/process/launch", Action: "process.launch", Class: server.NonRetryable, Handler: a.processLaunch},
 		{Method: "POST", Path: "/v1/process/open", Action: "process.open", Class: server.NonRetryable, Handler: a.processOpen},
+		{Method: "GET", Path: "/v1/process/list", Action: "process.list", Class: server.Retryable, Handler: a.processList},
+		{Method: "POST", Path: "/v1/process/kill", Action: "process.kill", Class: server.NonRetryable, Handler: a.processKill},
 	}
+}
+
+func (a *API) processList(c *server.Call) (any, error) {
+	name := c.Request.URL.Query().Get("name")
+	procs, err := async.Run(c.Context(timeoutProcess), func() ([]process.Info, error) { return process.List(name) })
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"processes": procs}, nil
+}
+
+// defaultGrace is the process/kill grace period (spec 6.5).
+const defaultGrace = 3 * time.Second
+
+func (a *API) processKill(c *server.Call) (any, error) {
+	var req protocol.KillRequest
+	if err := c.Decode(&req); err != nil {
+		return nil, err
+	}
+	if req.PID <= 0 {
+		return nil, protocol.Errorf(protocol.CodeInvalidRequest, "pid must be positive")
+	}
+	grace := defaultGrace
+	if req.GraceMS != nil {
+		if *req.GraceMS < 0 || *req.GraceMS > 600000 {
+			return nil, protocol.Errorf(protocol.CodeInvalidRequest, "grace_ms must be between 0 and 600000")
+		}
+		grace = time.Duration(*req.GraceMS) * time.Millisecond
+	}
+	c.Param("pid", strconv.Itoa(req.PID))
+	c.Param("tree", strconv.FormatBool(req.Tree))
+	c.Param("force", strconv.FormatBool(req.Force))
+	// Spec section 7: 10 s plus grace_ms.
+	ctx := c.Context(timeoutProcess + grace)
+	protected := map[int]bool{os.Getpid(): true, os.Getppid(): a.supervised}
+	res, err := process.Kill(ctx, process.KillRequest{PID: req.PID, Tree: req.Tree, Grace: grace, Force: req.Force}, protected)
+	switch {
+	case errors.Is(err, process.ErrNotFound):
+		return nil, protocol.Errorf(protocol.CodeNotFound, "process %d does not exist", req.PID)
+	case errors.Is(err, process.ErrProtected):
+		return nil, protocol.Errorf(protocol.CodeInvalidRequest, "process %d is vm-agent or its supervisor", req.PID)
+	case errors.Is(err, process.ErrUnsupported):
+		return nil, protocol.Unsupported("%v", err)
+	}
+	return res, err
 }
 
 // auditArgv records the spec section 8 summary of a command: the first two

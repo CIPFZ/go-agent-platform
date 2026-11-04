@@ -41,3 +41,11 @@ type OpenRequest struct {
 	Path string `json:"path"`
 	URL  string `json:"url"`
 }
+
+// KillRequest is the body of POST /v1/process/kill.
+type KillRequest struct {
+	PID     int  `json:"pid"`
+	Tree    bool `json:"tree"`
+	GraceMS *int `json:"grace_ms"`
+	Force   bool `json:"force"`
+}

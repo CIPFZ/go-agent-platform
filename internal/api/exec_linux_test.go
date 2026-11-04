@@ -119,3 +119,30 @@ func atoi(s string) int {
 	}
 	return n
 }
+
+func TestProcessListAndKill(t *testing.T) {
+	e := newEnv(t)
+	var launched protocol.LaunchResult
+	e.call("POST", "/v1/process/launch", map[string]any{"argv": []string{"sleep", "120"}}).into(t, &launched)
+	var list struct {
+		Processes []map[string]any `json:"processes"`
+	}
+	e.call("GET", "/v1/process/list?name=SLEEP", nil).into(t, &list)
+	found := false
+	for _, p := range list.Processes {
+		if int(p["pid"].(float64)) == launched.PID && p["exe"] != "" && p["started_at"] != nil {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("launched sleep %d not listed: %v", launched.PID, list.Processes)
+	}
+	var res map[string]any
+	e.call("POST", "/v1/process/kill", map[string]any{"pid": launched.PID, "grace_ms": 1000}).into(t, &res)
+	if res["graceful"] != true || res["exited"] != true {
+		t.Fatalf("kill = %v", res)
+	}
+	e.call("POST", "/v1/process/kill", map[string]any{"pid": launched.PID}).code(t, protocol.CodeNotFound)
+	e.call("POST", "/v1/process/kill", map[string]any{"pid": os.Getpid()}).code(t, protocol.CodeInvalidRequest)
+	e.call("POST", "/v1/process/kill", map[string]any{"pid": 0}).code(t, protocol.CodeInvalidRequest)
+}

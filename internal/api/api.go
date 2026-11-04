@@ -6,6 +6,7 @@ package api
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"runtime"
 	"sync"
@@ -23,6 +24,7 @@ import (
 	"github.com/CIPFZ/go-agent-platform/internal/policy"
 	"github.com/CIPFZ/go-agent-platform/internal/protocol"
 	"github.com/CIPFZ/go-agent-platform/internal/server"
+	"github.com/CIPFZ/go-agent-platform/internal/supervisor"
 )
 
 // Deps are the platform-facing dependencies; tests substitute fakes.
@@ -53,6 +55,10 @@ type API struct {
 	window     *window.Service
 	files      *file.FS
 	downloader *file.Downloader
+
+	// supervised is true when a -supervise parent started this process, so
+	// its pid is protected from process/kill.
+	supervised bool
 
 	lastInput atomic.Pointer[time.Time]
 	statsMu   sync.Mutex
@@ -109,6 +115,7 @@ func NewWithDeps(d Deps) (*API, error) {
 		files:   files,
 
 		downloader: file.NewDownloader(),
+		supervised: os.Getenv(supervisor.EnvSupervised) == "1",
 	}
 	return a, nil
 }
