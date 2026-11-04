@@ -79,6 +79,18 @@ Wayland 会话（`WAYLAND_DISPLAY` 已设置且 `XDG_SESSION_TYPE=wayland` 或�
 - 后台维护：每分钟按保留期与上限清理 job 与录像。
 - 关闭（spec 4.4）：停止接受新请求并等待在途请求最多 10 秒 → 取消仍未完成的请求（`timeout/agent_shutdown`），最多再等 2 秒让其写出响应与审计 → 停止进行中的录屏（向 ffmpeg 写 `q`，最多 5 秒）→ 终止后台 job（`killed/agent_shutdown`）→ 释放进程树 → 写关闭审计。`process/launch` 启动的程序不受影响。
 
+## 构建与可复现性
+
+发布二进制由 CI 的 `binaries` 作业构建（`.github/workflows/ci.yml`）：工具链为 `go.mod` 的 `go` 指令所指版本（当前 go1.26.0），`CGO_ENABLED=0 go build -trimpath`，`-ldflags "-s -w -X …/internal/version.Version=0.1.0-dev+<提交前 12 位>"`，Windows 另加 `-H=windowsgui`。产物与 `SHA256SUMS` 一起作为 artifact `vm-agent-binaries` 上传。
+
+同一提交、同一工具链、同一命令的构建逐字节一致，但产物哈希还取决于 Go 默认嵌入的 VCS 信息（`go version -m` 可见）：模块伪版本 `v0.0.0-<提交时间>-<提交>`、`vcs.revision`、`vcs.time`、`vcs.modified`。因此要复现 CI 产物：
+
+- 在普通 `git clone` 并检出目标提交的目录中构建。`git worktree` 的检出（`.git` 是文件而不是目录）不会被识别为仓库，产物不含 VCS 信息，哈希与 CI 不同。
+- 工作区必须干净：有未提交改动时 `vcs.modified=true`，哈希同样不同。
+- 用 `GOTOOLCHAIN=go<版本>` 固定工具链，命令与参数照抄 CI。
+
+核对方法：比较 `sha256sum` 与 artifact 中的 `SHA256SUMS`；不一致时用 `go version -m` 对比两个文件的构建信息定位差异。2026-11-04 对 run 71（`2a896a0`）按此方法本地构建，windows/amd64、linux/amd64、linux/arm64 三个产物均与 CI 逐字节一致。
+
 ## 状态与文件
 
 | 内容 | 位置 | 持久化 |
