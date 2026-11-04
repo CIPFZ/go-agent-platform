@@ -33,6 +33,7 @@ tags:
   - name: window
   - name: process
   - name: file
+  - name: clipboard
 
 paths:
   /v1/probe:
@@ -880,6 +881,43 @@ paths:
                     properties: {result: {$ref: '#/components/schemas/UploadResult'}}
         default: {$ref: '#/components/responses/Error'}
 
+  /v1/clipboard:
+    get:
+      operationId: clipboardRead
+      tags: [clipboard]
+      summary: Read the clipboard
+      description: |
+        formats lists the format names present (Windows clipboard formats such
+        as CF_UNICODETEXT and PNG; X selection targets such as UTF8_STRING and
+        image/png); text and image are filled when available, both when both
+        are. Windows prefers the registered PNG format and falls back to
+        CF_DIB. On Linux the CLIPBOARD selection is read; content written by
+        vm-agent is lost when it exits unless a clipboard manager keeps it.
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      responses:
+        '200':
+          description: Clipboard content.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties: {result: {$ref: '#/components/schemas/ClipboardResult'}}
+        default: {$ref: '#/components/responses/Error'}
+    post:
+      operationId: clipboardWrite
+      tags: [clipboard]
+      summary: Replace the clipboard with text or a PNG image
+      description: On Windows an image is placed both as the registered PNG format and as CF_DIB.
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/ClipboardWriteRequest'}}}
+      responses:
+        '200': {$ref: '#/components/responses/Empty'}
+        default: {$ref: '#/components/responses/Error'}
+
 components:
   parameters:
     RequestID:
@@ -1044,7 +1082,7 @@ components:
         session: {$ref: '#/components/schemas/SessionStatus'}
         actions:
           type: array
-          description: Action groups in the order screen, input, window, exec, process, file; display groups are absent while the display is not ready.
+          description: Action groups in the order screen, input, window, exec, process, file, clipboard, record; display groups (screen, input, window, clipboard, record) are absent while the display is not ready, record also without ffmpeg.
           items: {type: string}
         limits: {$ref: '#/components/schemas/Limits'}
 
@@ -1511,3 +1549,18 @@ components:
         remaining:
           type: array
           items: {$ref: '#/components/schemas/Window'}
+    ClipboardResult:
+      type: object
+      required: [formats]
+      properties:
+        formats:
+          type: array
+          items: {type: string}
+        text: {type: string}
+        image: {type: string, format: byte, description: PNG.}
+    ClipboardWriteRequest:
+      type: object
+      description: Exactly one of text or image.
+      properties:
+        text: {type: string}
+        image: {type: string, format: byte, description: PNG.}

@@ -89,7 +89,7 @@ type CapabilitiesResult struct {
 	Version  string        `json:"version"`
 	Display  DisplayStatus `json:"display"`
 	Session  SessionStatus `json:"session"`
-	// Action groups in the order screen, input, window, exec, process, file; display groups are absent while the display is not ready.
+	// Action groups in the order screen, input, window, exec, process, file, clipboard, record; display groups (screen, input, window, clipboard, record) are absent while the display is not ready, record also without ffmpeg.
 	Actions []string `json:"actions"`
 	Limits  Limits   `json:"limits"`
 }
@@ -575,6 +575,22 @@ type CloseAllResult struct {
 	Remaining []Window `json:"remaining"`
 }
 
+// ClipboardResult is the ClipboardResult schema.
+type ClipboardResult struct {
+	Formats []string `json:"formats"`
+	Text    *string  `json:"text,omitempty"`
+	// PNG.
+	Image []byte `json:"image,omitempty"`
+}
+
+// ClipboardWriteRequest is the ClipboardWriteRequest schema.
+// Exactly one of text or image.
+type ClipboardWriteRequest struct {
+	Text *string `json:"text,omitempty"`
+	// PNG.
+	Image []byte `json:"image,omitempty"`
+}
+
 // Operation identifies one API endpoint.
 type Operation struct {
 	ID     string
@@ -628,6 +644,8 @@ var Operations = []Operation{
 	{ID: "fileCopy", Method: "POST", Path: "/v1/file/copy"},
 	{ID: "fileDownload", Method: "POST", Path: "/v1/file/download"},
 	{ID: "fileUpload", Method: "POST", Path: "/v1/file/upload"},
+	{ID: "clipboardRead", Method: "GET", Path: "/v1/clipboard"},
+	{ID: "clipboardWrite", Method: "POST", Path: "/v1/clipboard"},
 }
 
 // Probe calls GET /v1/probe: Service and desktop session health.
@@ -1090,6 +1108,29 @@ func (c *Client) FileUpload(ctx context.Context, files []UploadFile, options *Up
 		return nil, err
 	}
 	return &out, nil
+}
+
+// ClipboardRead calls GET /v1/clipboard: Read the clipboard.
+//
+// formats lists the format names present (Windows clipboard formats such
+// as CF_UNICODETEXT and PNG; X selection targets such as UTF8_STRING and
+// image/png); text and image are filled when available, both when both
+// are. Windows prefers the registered PNG format and falls back to
+// CF_DIB. On Linux the CLIPBOARD selection is read; content written by
+// vm-agent is lost when it exits unless a clipboard manager keeps it.
+func (c *Client) ClipboardRead(ctx context.Context, opts ...Option) (*ClipboardResult, error) {
+	var out ClipboardResult
+	if err := c.do(ctx, "GET", "/v1/clipboard", nil, nil, &out, opts); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ClipboardWrite calls POST /v1/clipboard: Replace the clipboard with text or a PNG image.
+//
+// On Windows an image is placed both as the registered PNG format and as CF_DIB.
+func (c *Client) ClipboardWrite(ctx context.Context, body *ClipboardWriteRequest, opts ...Option) error {
+	return c.do(ctx, "POST", "/v1/clipboard", nil, body, nil, opts)
 }
 
 // ExecResponse holds whichever of ExecResult or ExecDetachedResult the response carries.

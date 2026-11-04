@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/CIPFZ/go-agent-platform/internal/actions/clipboard"
 	"github.com/CIPFZ/go-agent-platform/internal/actions/exec"
 	"github.com/CIPFZ/go-agent-platform/internal/actions/file"
 	"github.com/CIPFZ/go-agent-platform/internal/actions/input"
@@ -35,6 +36,7 @@ type Deps struct {
 	Screen       screen.Backend
 	Input        input.Backend
 	Window       window.Backend
+	Clipboard    clipboard.Backend
 	Session      func() session.State
 	DPIAwareness string
 	Policy       *policy.Policy
@@ -54,6 +56,7 @@ type API struct {
 	screen     *screen.Service
 	input      *input.Service
 	window     *window.Service
+	clipboard  *clipboard.Service
 	files      *file.FS
 	downloader *file.Downloader
 	jobs       *exec.Jobs
@@ -92,6 +95,7 @@ func New(cfg *config.Config, sink audit.Sink) (*API, error) {
 		Screen:       screen.NewBackend(),
 		Input:        input.NewBackend(),
 		Window:       window.NewBackend(),
+		Clipboard:    clipboard.NewBackend(),
 		Session:      session.Detect,
 		DPIAwareness: session.InitDPIAwareness(),
 		Policy:       pol,
@@ -122,7 +126,9 @@ func NewWithDeps(d Deps) (*API, error) {
 		screen:  screen.NewService(d.Screen),
 		input:   input.NewService(d.Input),
 		window:  window.NewService(d.Window),
-		files:   files,
+
+		clipboard: clipboard.NewService(d.Clipboard),
+		files:     files,
 
 		downloader: file.NewDownloader(),
 		supervised: os.Getenv(supervisor.EnvSupervised) == "1",
@@ -186,6 +192,7 @@ func (a *API) Routes() []*server.Route {
 	r = append(r, a.windowRoutes()...)
 	r = append(r, a.processRoutes()...)
 	r = append(r, a.jobRoutes()...)
+	r = append(r, a.clipboardRoutes()...)
 	r = append(r, a.fileRoutes()...)
 	return r
 }

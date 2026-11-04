@@ -44,7 +44,7 @@ func TestProbeAndCapabilitiesOnX11(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(caps.Actions, ",") != "screen,input,window,exec,process,file" {
+	if strings.Join(caps.Actions, ",") != "screen,input,window,exec,process,file,clipboard" {
 		t.Fatalf("actions = %v", caps.Actions)
 	}
 }

@@ -161,3 +161,17 @@ type CloseAllRequest struct {
 	ExcludePIDs   []int    `json:"exclude_pids"`
 	WaitMS        *int     `json:"wait_ms"`
 }
+
+// ClipboardResult is the result of GET /v1/clipboard.
+type ClipboardResult struct {
+	Formats []string `json:"formats"`
+	Text    *string  `json:"text,omitempty"`
+	Image   *string  `json:"image,omitempty"` // base64 PNG
+}
+
+// ClipboardWriteRequest is the body of POST /v1/clipboard: exactly one of
+// text or image (base64 PNG).
+type ClipboardWriteRequest struct {
+	Text  *string `json:"text"`
+	Image *string `json:"image"`
+}

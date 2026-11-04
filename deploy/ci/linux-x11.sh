@@ -2,7 +2,8 @@
 # Linux X11 CI stage (spec section 12): start Xvfb and openbox, run the
 # integration suite, then the deploy/e2e.sh regression against a freshly
 # built vm-agent. Used by .github/workflows/ci.yml and runnable in any
-# Ubuntu 24.04 environment with: xvfb openbox mousepad dbus jq curl.
+# Ubuntu 24.04 environment with: xvfb openbox mousepad dbus jq curl ffmpeg
+# xclip.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
@@ -25,7 +26,7 @@ pids+=($!)
 sleep 1
 
 echo "== integration suite"
-VM_AGENT_INTEGRATION=1 deploy/ci/gotest.sh -count=1 -v ./test/integration/
+VM_AGENT_INTEGRATION=1 deploy/ci/gotest.sh -count=1 -v ./test/integration/ ./internal/actions/clipboard/
 
 echo "== deploy/e2e.sh"
 go build -o "$WORK/vm-agent" ./cmd/vm-agent

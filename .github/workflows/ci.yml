@@ -43,7 +43,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
-            xvfb openbox mousepad dbus jq curl ffmpeg
+            xvfb openbox mousepad dbus jq curl ffmpeg xclip
       - name: Integration suite and e2e regression on Xvfb + openbox
         env:
           VM_AGENT_RACE: "1"

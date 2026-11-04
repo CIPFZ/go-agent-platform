@@ -82,10 +82,14 @@ func (a *API) capabilities(c *server.Call) (any, error) {
 // 9. Display-bound groups are omitted while the display is not ready.
 func (a *API) actions(displayReady bool) []string {
 	var out []string
-	if displayReady {
-		out = append(out, "screen", "input", "window")
+	for _, g := range []struct {
+		name    string
+		display bool
+	}{{"screen", true}, {"input", true}, {"window", true}, {"exec", false}, {"process", false}, {"file", false}, {"clipboard", true}} {
+		if displayReady || !g.display {
+			out = append(out, g.name)
+		}
 	}
-	out = append(out, "exec", "process", "file")
 	return out
 }
 

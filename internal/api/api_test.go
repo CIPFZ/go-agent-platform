@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"image"
@@ -14,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/CIPFZ/go-agent-platform/internal/actions/clipboard"
 	"github.com/CIPFZ/go-agent-platform/internal/actions/screen"
 	"github.com/CIPFZ/go-agent-platform/internal/actions/session"
 	"github.com/CIPFZ/go-agent-platform/internal/audit"
@@ -67,6 +69,7 @@ func newEnv(t *testing.T, mutate ...func(*Deps)) *testEnv {
 		Screen:       fakeScreen{},
 		Input:        &fakeInput{},
 		Window:       &fakeWindows{},
+		Clipboard:    &fakeClipboard{},
 		Session:      func() session.State { e.mu.Lock(); defer e.mu.Unlock(); return e.state },
 		DPIAwareness: "per_monitor_v2",
 	}
@@ -272,4 +275,29 @@ func (e *testEnv) lastAudit(action string) audit.Event {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
+}
+
+type fakeClipboard struct {
+	mu      sync.Mutex
+	content clipboard.Content
+}
+
+func (f *fakeClipboard) Read(context.Context) (clipboard.Content, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.content, nil
+}
+
+func (f *fakeClipboard) WriteText(_ context.Context, text string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.content = clipboard.Content{Formats: []string{"UTF8_STRING"}, Text: &text}
+	return nil
+}
+
+func (f *fakeClipboard) WritePNG(_ context.Context, data []byte) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.content = clipboard.Content{Formats: []string{"image/png"}, PNG: data}
+	return nil
 }
