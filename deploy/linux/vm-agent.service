@@ -1,0 +1,22 @@
+# systemd user unit for vm-agent (spec 4.1). Installed by deploy/linux/install.sh
+# into ~/.config/systemd/user/; arguments and the display environment live in
+# ~/.config/vm-agent/vm-agent.env, which upgrades never overwrite.
+[Unit]
+Description=vm-agent desktop automation service
+After=graphical-session.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/vm-agent/vm-agent.env
+ExecStart=%h/.local/lib/vm-agent/current/vm-agent $VM_AGENT_ARGS
+Restart=always
+RestartSec=5
+# Only the agent process is stopped with the unit: programs started with
+# process/launch must outlive a restart (spec D4), while commands, jobs and
+# ffmpeg are terminated by vm-agent itself (its shutdown path, or the
+# orphan reaper at the next start after a crash).
+KillMode=process
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target
