@@ -12,7 +12,7 @@ HTTP 骨架与直通鉴权位、审计、去重、`probe`、`capabilities`、`sc
 
 ## 阶段 3：可选能力（已完成）
 
-- `a11y/tree`：Windows 通过内嵌 PowerShell 脚本（`System.Windows.Automation`）限时子进程，Linux 通过 vm-agent 自身作为 AT-SPI helper 的限时子进程；`window_id` 省略时取前台窗口。
+- `a11y/tree`：Windows 与 Linux 都由 vm-agent 自身作为 helper 的限时子进程采集：Windows 走原生 UI Automation COM 接口（`IUIAutomation`，含标准 Win32 控件的代理），Linux 走 AT-SPI；`window_id` 省略时取前台窗口。
 - Wayland：截图走 portal Screenshot，输入走 uinput 虚拟设备；uinput 不可写且存有 RemoteDesktop restore token 时改用 portal RemoteDesktop。窗口、剪贴板、录屏与无障碍在 Wayland 下返回 `unsupported`。
 - 多显示器矩阵测试：Xorg dummy 驱动上的六种布局（单屏、主屏在左、主屏在右且错位、三屏、副屏在上、混合缩放）。
 - 可选对象存储上传器：`POST /v1/record/{session_id}/upload`，`-upload-s3-*` 参数。

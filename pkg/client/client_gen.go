@@ -1330,7 +1330,7 @@ func (c *Client) RecordUpload(ctx context.Context, sessionID string, body *Recor
 // A11yTree calls POST /v1/a11y/tree: Accessibility tree of a window (optional capability).
 //
 // Collected in a child process that is killed when the request times out
-// (default 15 s, retryable): UI Automation through Windows PowerShell,
+// (default 15 s, retryable): native UI Automation (IUIAutomation) on Windows,
 // AT-SPI over D-Bus on Linux. window_id defaults to the foreground
 // window. Roles are the platform role names in snake_case (Windows
 // control types such as button and list_item, AT-SPI roles such as

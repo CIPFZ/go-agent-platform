@@ -105,7 +105,7 @@ go-agent-platform 是一个运行在虚拟机内的 Agent 服务（下文称 `vm
 Windows 二进制以 GUI 子系统构建（`go build -ldflags -H=windowsgui`），由计划任务在用户登录时启动时不会在自动化桌面上出现控制台窗口；控制台窗口会遮挡截图内容、抢占前台焦点，也可能被误关闭而终止服务。由此带来的约束：
 
 - 进程没有控制台，诊断输出不可见：`-supervise` 父进程把子进程的 stdout、stderr 与自身日志写入锁文件旁的 `vm-agent.log`（超过 10 MiB 轮转，保留一个备份）。手动运行排障时输出不会显示在启动它的控制台中，需重定向到文件（如 `vm-agent.exe <参数> > out.log 2>&1`）。
-- 服务启动的控制台子进程（`exec` 与后台 job、ffmpeg 及其启动探测、`a11y/tree` 的 PowerShell helper）以 `CREATE_NO_WINDOW` 创建，不弹出窗口，输出仍经管道返回；GUI 程序忽略该标志。`process/launch` 以 `DETACHED_PROCESS` 启动，不继承控制台。
+- 服务启动的控制台子进程（`exec` 与后台 job、ffmpeg 及其启动探测）以 `CREATE_NO_WINDOW` 创建，不弹出窗口，输出仍经管道返回；GUI 程序忽略该标志。`process/launch` 以 `DETACHED_PROCESS` 启动，不继承控制台。
 
 Windows 进程启动后首先调用 `SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)`，失败则回退 `SetProcessDPIAware`，并在 `probe` 中上报实际生效的感知级别。
 
@@ -468,7 +468,7 @@ VM 是隔离单元。`vm-agent` 以桌面用户身份运行，权限等同该用
 | 文件 | 标准库；`SHGetKnownFolderPath` 取特殊目录；`GetFileAttributes` 取 hidden/readonly | 标准库；`xdg-user-dirs` 配置文件解析 | 复用原子写 |
 | 剪贴板 | `OpenClipboard`、`GetClipboardData`，读取优先注册格式 `PNG` 再回退 CF_DIB；写入图像时同时放置 `PNG` 注册格式与 CF_DIB，保证 alpha 与兼容性 | xgb 实现 X selection 的 owner 与 request，支持 `UTF8_STRING` 与 `image/png`。限制：X selection 内容由 owner 进程持续提供，`vm-agent` 重启后其写入的剪贴板内容即丢失；需要持久化时镜像应预装剪贴板管理器 | 纯 Go |
 | 录屏 | `ffmpeg -f gdigrab -framerate N -i desktop -c:v libx264 -preset ultrafast -crf 28 -pix_fmt yuv420p` | `ffmpeg -f x11grab -framerate N -i $DISPLAY ...` | 子进程进 Job |
-| 无障碍 | PowerShell `System.Windows.Automation` 限时子进程输出 JSON | AT-SPI 通过 D-Bus，限时子进程 | 阶段 3 |
+| 无障碍 | 原生 UI Automation（`IUIAutomation` COM，syscall 调用 vtable），vm-agent 自身作为限时 helper 子进程输出 JSON；托管 `System.Windows.Automation` 在缺少 Win32 代理的机器上会把标准控件退化为 pane，故不采用 | AT-SPI 通过 D-Bus，限时子进程 | 阶段 3 |
 | 去重 | 内存 LRU 加在途集合，key 为 `方法 + 路径 + request_id` | 同 | |
 | 审计 | 复用 `internal/audit` | 同 | `internal/credentials`、`internal/tlsreload` 保留但当前不接入 |
 

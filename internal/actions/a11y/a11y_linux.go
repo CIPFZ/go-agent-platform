@@ -4,9 +4,7 @@ package a11y
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
 	"sort"
 	"time"
@@ -27,17 +25,7 @@ func (atspi) command(req Request) (*exec.Cmd, error) {
 	if wayland.Active() {
 		return nil, protocol.Unsupported("accessibility trees are not available in a Wayland session")
 	}
-	exe, err := os.Executable()
-	if err != nil {
-		return nil, err
-	}
-	data, err := json.Marshal(req)
-	if err != nil {
-		return nil, err
-	}
-	cmd := exec.Command(exe)
-	cmd.Env = append(os.Environ(), helperEnv+"="+string(data))
-	return cmd, nil
+	return helperCommand(req)
 }
 
 const (

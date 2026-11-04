@@ -1,8 +1,8 @@
 // Package a11y implements /v1/a11y/tree (spec 6.9): the accessibility tree
 // of a window, collected in a time-limited child process so a hung
-// application can never block vm-agent. Windows runs a PowerShell script
-// using UI Automation; Linux re-executes vm-agent as a helper that walks
-// AT-SPI over D-Bus.
+// application can never block vm-agent. On both platforms vm-agent
+// re-executes itself as the helper: Windows walks the native UI Automation
+// COM interfaces, Linux walks AT-SPI over D-Bus.
 package a11y
 
 import (
@@ -140,6 +140,21 @@ func (l *limitWriter) Write(p []byte) (int, error) {
 // helperEnv marks a vm-agent process started as the accessibility helper;
 // its value is the JSON request.
 const helperEnv = "VM_AGENT_A11Y_HELPER"
+
+// helperCommand re-executes vm-agent as the helper for req.
+func helperCommand(req Request) (*exec.Cmd, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+	data, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+	cmd := exec.Command(exe)
+	cmd.Env = append(os.Environ(), helperEnv+"="+string(data))
+	return cmd, nil
+}
 
 // IsHelper reports whether this process was started as the helper.
 func IsHelper() bool { return os.Getenv(helperEnv) != "" }
