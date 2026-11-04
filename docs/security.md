@@ -42,6 +42,12 @@
 - 剪贴板：Linux 上由 `vm-agent` 写入的内容只存在于本进程，退出即消失；需要持久化时由镜像中的剪贴板管理器负责。
 - 录像、job 输出与审计写在桌面用户的目录中，目录权限 0700。
 
+## 可选能力的安全要点
+
+- Wayland 输入：`/dev/uinput` 通过 udev `uaccess` 标签只授予当前活动本地会话的用户，而不是 `input` 组（该组还能读取所有输入设备）。RemoteDesktop 回退的 restore token 以 0600 权限保存在锁文件旁。
+- 对象存储上传：访问密钥与私钥只从 `-upload-s3-access-key-file`、`-upload-s3-secret-key-file` 读取（每次上传重读，不进审计）；对象键不能逃出 `-upload-s3-prefix`。`-upload-s3-insecure` 使用明文 HTTP，仅用于受信任的内网。
+- 无障碍树：helper 子进程以同一桌面用户身份运行，超时即整树终止。
+
 ## 部署建议
 
 - 只在专用的自动化 VM 上运行；不要在含个人数据的桌面上启用。

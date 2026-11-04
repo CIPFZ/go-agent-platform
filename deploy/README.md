@@ -29,5 +29,17 @@ and `previous` junctions, `config\vm-agent.args` (arguments, kept across
 upgrades) and `state\` (audit log, jobs, recordings, `vm-agent.lock`,
 `vm-agent.log`).
 
+Wayland sessions (spec 13.3): run `sudo linux/preconditions.sh --system
+--wayland` so the active session user can create the uinput device used for
+input. Where uinput cannot be granted, approve the portal RemoteDesktop
+fallback once in the session with `VM_AGENT_PORTAL_SETUP=1 vm-agent
+<usual flags>`; the restore token is stored next to `vm-agent.lock`.
+
+Recording uploads (optional): add `-upload-s3-endpoint host:port
+-upload-s3-bucket NAME -upload-s3-access-key-file F -upload-s3-secret-key-file F`
+(and `-upload-s3-prefix`, `-upload-s3-insecure` as needed) to the agent
+arguments; key files are reread on every upload, so they can be rotated in
+place.
+
 Authentication and TLS are not implemented (spec D9): bind `-listen` to the
 platform-facing interface and restrict the port at the network layer.
