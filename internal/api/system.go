@@ -90,6 +90,11 @@ func (a *API) actions(displayReady bool) []string {
 			out = append(out, g.name)
 		}
 	}
+	// The optional uploader is listed on its own: uploading finished
+	// recordings needs neither the display nor ffmpeg.
+	if a.uploader != nil {
+		out = append(out, "record_upload")
+	}
 	return out
 }
 

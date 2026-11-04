@@ -189,3 +189,8 @@ type RecordStartRequest struct {
 type RecordStopRequest struct {
 	SessionID string `json:"session_id"`
 }
+
+// RecordUploadRequest is the body of POST /v1/record/{session_id}/upload.
+type RecordUploadRequest struct {
+	Key string `json:"key"`
+}

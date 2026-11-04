@@ -1026,6 +1026,36 @@ paths:
         '200': {$ref: '#/components/responses/Empty'}
         default: {$ref: '#/components/responses/Error'}
 
+  /v1/record/{session_id}/upload:
+    post:
+      operationId: recordUpload
+      tags: [record]
+      summary: Upload a finished recording to object storage (optional)
+      description: |
+        Copies the MP4 to the S3-compatible bucket configured with the
+        -upload-s3-* flags; key defaults to <session_id>.mp4 and is placed
+        under -upload-s3-prefix. unsupported when no storage is configured
+        (capabilities then lacks record_upload); a session still recording is
+        a conflict. Default timeout 10 minutes, at most 1 hour. The local file
+        is kept.
+      parameters:
+        - {$ref: '#/components/parameters/RequestID'}
+        - {$ref: '#/components/parameters/TimeoutMS'}
+        - {$ref: '#/components/parameters/SessionID'}
+      requestBody:
+        content: {application/json: {schema: {$ref: '#/components/schemas/RecordUploadRequest'}}}
+      responses:
+        '200':
+          description: Uploaded object.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties: {result: {$ref: '#/components/schemas/RecordUploadResult'}}
+        default: {$ref: '#/components/responses/Error'}
+
 components:
   parameters:
     RequestID:
@@ -1195,7 +1225,7 @@ components:
         session: {$ref: '#/components/schemas/SessionStatus'}
         actions:
           type: array
-          description: Action groups in the order screen, input, window, exec, process, file, clipboard, record; display groups (screen, input, window, clipboard, record) are absent while the display is not ready, record also without ffmpeg.
+          description: Action groups in the order screen, input, window, exec, process, file, clipboard, record, record_upload; display groups (screen, input, window, clipboard, record) are absent while the display is not ready, record also without ffmpeg, record_upload without configured object storage.
           items: {type: string}
         limits: {$ref: '#/components/schemas/Limits'}
 
@@ -1725,3 +1755,17 @@ components:
         sessions:
           type: array
           items: {$ref: '#/components/schemas/RecordSession'}
+    RecordUploadRequest:
+      type: object
+      properties:
+        key: {type: string, description: Object key relative to the configured prefix; default <session_id>.mp4.}
+    RecordUploadResult:
+      type: object
+      required: [session_id, bucket, key, size, etag, sha256]
+      properties:
+        session_id: {type: string}
+        bucket: {type: string}
+        key: {type: string}
+        size: {type: integer, format: int64}
+        etag: {type: string}
+        sha256: {type: string, description: Of the uploaded file.}

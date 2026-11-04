@@ -36,7 +36,49 @@ func (a *API) recordRoutes() []*server.Route {
 		{Method: "GET", Path: "/v1/record/list", Action: "record.list", Class: server.Retryable, Handler: a.recordList},
 		{Method: "GET", Path: "/v1/record/{session_id}", Action: "record.download", Class: server.Retryable, Transfer: true, Handler: a.recordDownload},
 		{Method: "DELETE", Path: "/v1/record/{session_id}", Action: "record.delete", Class: server.NonRetryable, Handler: a.recordDelete},
+		{Method: "POST", Path: "/v1/record/{session_id}/upload", Action: "record.upload", Class: server.NonRetryable, Transfer: true, Handler: a.recordUpload},
 	}
+}
+
+// recordUpload copies a finished recording to the configured bucket
+// (spec 13.3, optional). The key defaults to <session_id>.mp4 under the
+// configured prefix.
+func (a *API) recordUpload(c *server.Call) (any, error) {
+	var req protocol.RecordUploadRequest
+	if err := c.Decode(&req); err != nil {
+		return nil, err
+	}
+	id := c.Request.PathValue("session_id")
+	c.Param("session_id", id)
+	if a.uploader == nil {
+		return nil, protocol.Unsupported("no object storage is configured (-upload-s3-endpoint)")
+	}
+	if req.Key == "" {
+		req.Key = id + ".mp4"
+	}
+	key, err := a.uploader.ObjectKey(req.Key)
+	if err != nil {
+		return nil, protocol.Errorf(protocol.CodeInvalidRequest, "%v", err)
+	}
+	c.Param("key", key)
+	f, s, err := a.recorder.OpenVideo(id)
+	if err != nil {
+		return nil, recordError(err)
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	res, err := a.uploader.Put(c.Context(timeoutDownload), key, f, info.Size(), "video/mp4")
+	if err != nil {
+		if isContextError(err) {
+			return nil, err
+		}
+		return nil, protocol.Errorf(protocol.CodeIOFailed, "upload to bucket %s: %v", a.uploader.Bucket(), err)
+	}
+	c.Param("size", strconv.FormatInt(res.Size, 10))
+	return map[string]any{"session_id": id, "bucket": res.Bucket, "key": res.Key, "size": res.Size, "etag": res.ETag, "sha256": s.SHA256}, nil
 }
 
 func recordError(err error) error {

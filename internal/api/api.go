@@ -29,6 +29,7 @@ import (
 	"github.com/CIPFZ/go-agent-platform/internal/protocol"
 	"github.com/CIPFZ/go-agent-platform/internal/server"
 	"github.com/CIPFZ/go-agent-platform/internal/supervisor"
+	"github.com/CIPFZ/go-agent-platform/internal/upload"
 )
 
 // Deps are the platform-facing dependencies; tests substitute fakes.
@@ -41,6 +42,8 @@ type Deps struct {
 	Clipboard clipboard.Backend
 	// FFmpeg is the resolved ffmpeg executable; empty disables recording.
 	FFmpeg string
+	// Uploader is the optional object-storage uploader; nil disables it.
+	Uploader *upload.Uploader
 	// RecordGrabArgs overrides ffmpeg's input arguments (tests).
 	RecordGrabArgs func(fps int, r protocol.Rect) ([]string, error)
 	Session        func() session.State
@@ -67,6 +70,7 @@ type API struct {
 	downloader *file.Downloader
 	jobs       *exec.Jobs
 	recorder   *record.Recorder
+	uploader   *upload.Uploader
 
 	stopJanitor chan struct{}
 	janitorDone chan struct{}
@@ -96,12 +100,22 @@ func New(cfg *config.Config, sink audit.Sink) (*API, error) {
 	if err := process.TrackTrees(treeDir); err != nil {
 		return nil, err
 	}
+	var uploader *upload.Uploader
+	if cfg.UploadS3Endpoint != "" {
+		if uploader, err = upload.New(upload.Config{
+			Endpoint: cfg.UploadS3Endpoint, Bucket: cfg.UploadS3Bucket, Prefix: cfg.UploadS3Prefix,
+			AccessKeyFile: cfg.UploadS3AccessKeyFile, SecretKeyFile: cfg.UploadS3SecretKeyFile, Insecure: cfg.UploadS3Insecure,
+		}); err != nil {
+			return nil, err
+		}
+	}
 	ffmpeg, ffErr := record.FindFFmpeg(cfg.FFmpeg)
 	if ffErr != nil {
 		log.Printf("vm-agent: recording unavailable: %v", ffErr)
 	}
 	return NewWithDeps(Deps{
 		FFmpeg:       ffmpeg,
+		Uploader:     uploader,
 		Config:       cfg,
 		Audit:        sink,
 		Screen:       screen.NewBackend(),
@@ -153,6 +167,7 @@ func NewWithDeps(d Deps) (*API, error) {
 		supervised: os.Getenv(supervisor.EnvSupervised) == "1",
 		jobs:       jobs,
 		recorder:   recorder,
+		uploader:   d.Uploader,
 
 		stopJanitor: make(chan struct{}),
 		janitorDone: make(chan struct{}),

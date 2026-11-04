@@ -3,13 +3,18 @@
 package api
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/minio/minio-go/v7"
+	miniocreds "github.com/minio/minio-go/v7/pkg/credentials"
+
 	"github.com/CIPFZ/go-agent-platform/internal/actions/session"
 	"github.com/CIPFZ/go-agent-platform/internal/protocol"
+	"github.com/CIPFZ/go-agent-platform/internal/upload"
 )
 
 const fakeFFmpeg = `#!/bin/sh
@@ -98,4 +103,64 @@ func TestShutdownFinishesRecording(t *testing.T) {
 	}
 	e.setSession(session.State{})
 	e.call("POST", "/v1/record/start", `{}`).code(t, protocol.CodeNoDisplay)
+}
+
+// TestRecordUploadToMinIO runs when VM_AGENT_S3_ENDPOINT points at an
+// S3-compatible server (MinIO in CI).
+func TestRecordUploadToMinIO(t *testing.T) {
+	endpoint := os.Getenv("VM_AGENT_S3_ENDPOINT")
+	if endpoint == "" {
+		t.Skip("set VM_AGENT_S3_ENDPOINT, VM_AGENT_S3_ACCESS_KEY and VM_AGENT_S3_SECRET_KEY")
+	}
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "a"), []byte(os.Getenv("VM_AGENT_S3_ACCESS_KEY")), 0o600)
+	os.WriteFile(filepath.Join(dir, "s"), []byte(os.Getenv("VM_AGENT_S3_SECRET_KEY")), 0o600)
+	admin, err := minio.New(endpoint, &minio.Options{Creds: miniocreds.NewStaticV4(os.Getenv("VM_AGENT_S3_ACCESS_KEY"), os.Getenv("VM_AGENT_S3_SECRET_KEY"), "")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exists, err := admin.BucketExists(context.Background(), "vm-agent-api"); err != nil {
+		t.Fatal(err)
+	} else if !exists {
+		if err := admin.MakeBucket(context.Background(), "vm-agent-api", minio.MakeBucketOptions{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	up, err := upload.New(upload.Config{Endpoint: endpoint, Bucket: "vm-agent-api", Prefix: "api", AccessKeyFile: filepath.Join(dir, "a"), SecretKeyFile: filepath.Join(dir, "s"), Insecure: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(t.TempDir(), "ffmpeg")
+	os.WriteFile(bin, []byte(fakeFFmpeg), 0o755)
+	e := newEnv(t, func(d *Deps) {
+		d.FFmpeg, d.Uploader = bin, up
+		d.RecordGrabArgs = func(int, protocol.Rect) ([]string, error) { return []string{"-f", "fake"}, nil }
+	})
+	var caps protocol.CapabilitiesResult
+	e.call("GET", "/v1/capabilities", nil).into(t, &caps)
+	if caps.Actions[len(caps.Actions)-1] != "record_upload" {
+		t.Fatalf("actions = %v", caps.Actions)
+	}
+	var started struct {
+		SessionID string `json:"session_id"`
+	}
+	e.call("POST", "/v1/record/start", `{}`).into(t, &started)
+	e.call("POST", "/v1/record/"+started.SessionID+"/upload", `{}`).code(t, protocol.CodeConflict)
+	e.call("POST", "/v1/record/stop", map[string]any{"session_id": started.SessionID}).into(t, &map[string]any{})
+	var res map[string]any
+	e.call("POST", "/v1/record/"+started.SessionID+"/upload", `{}`).into(t, &res)
+	if res["key"] != "api/"+started.SessionID+".mp4" || res["size"] != float64(13) || res["bucket"] != "vm-agent-api" {
+		t.Fatalf("upload = %v", res)
+	}
+	e.call("POST", "/v1/record/"+started.SessionID+"/upload", `{"key":"custom/name.mp4"}`).into(t, &res)
+	if res["key"] != "api/custom/name.mp4" {
+		t.Fatalf("custom key = %v", res)
+	}
+	e.call("POST", "/v1/record/"+started.SessionID+"/upload", `{"key":"../escape"}`).code(t, protocol.CodeInvalidRequest)
+	e.call("POST", "/v1/record/nope/upload", `{}`).code(t, protocol.CodeNotFound)
+}
+
+func TestRecordUploadUnsupportedWithoutStorage(t *testing.T) {
+	e := recordEnv(t)
+	e.call("POST", "/v1/record/x/upload", `{}`).code(t, protocol.CodeUnsupported)
 }

@@ -89,7 +89,7 @@ type CapabilitiesResult struct {
 	Version  string        `json:"version"`
 	Display  DisplayStatus `json:"display"`
 	Session  SessionStatus `json:"session"`
-	// Action groups in the order screen, input, window, exec, process, file, clipboard, record; display groups (screen, input, window, clipboard, record) are absent while the display is not ready, record also without ffmpeg.
+	// Action groups in the order screen, input, window, exec, process, file, clipboard, record, record_upload; display groups (screen, input, window, clipboard, record) are absent while the display is not ready, record also without ffmpeg, record_upload without configured object storage.
 	Actions []string `json:"actions"`
 	Limits  Limits   `json:"limits"`
 }
@@ -643,6 +643,23 @@ type RecordListResult struct {
 	Sessions []RecordSession `json:"sessions"`
 }
 
+// RecordUploadRequest is the RecordUploadRequest schema.
+type RecordUploadRequest struct {
+	// Object key relative to the configured prefix; default <session_id>.mp4.
+	Key *string `json:"key,omitempty"`
+}
+
+// RecordUploadResult is the RecordUploadResult schema.
+type RecordUploadResult struct {
+	SessionID string `json:"session_id"`
+	Bucket    string `json:"bucket"`
+	Key       string `json:"key"`
+	Size      int64  `json:"size"`
+	Etag      string `json:"etag"`
+	// Of the uploaded file.
+	SHA256 string `json:"sha256"`
+}
+
 // Operation identifies one API endpoint.
 type Operation struct {
 	ID     string
@@ -703,6 +720,7 @@ var Operations = []Operation{
 	{ID: "recordList", Method: "GET", Path: "/v1/record/list"},
 	{ID: "recordDownload", Method: "GET", Path: "/v1/record/{session_id}"},
 	{ID: "recordDelete", Method: "DELETE", Path: "/v1/record/{session_id}"},
+	{ID: "recordUpload", Method: "POST", Path: "/v1/record/{session_id}/upload"},
 }
 
 // Probe calls GET /v1/probe: Service and desktop session health.
@@ -1241,6 +1259,22 @@ func (c *Client) RecordDownload(ctx context.Context, sessionID string, opts ...O
 // RecordDelete calls DELETE /v1/record/{session_id}: Delete a finished recording.
 func (c *Client) RecordDelete(ctx context.Context, sessionID string, opts ...Option) error {
 	return c.do(ctx, "DELETE", strings.ReplaceAll("/v1/record/{session_id}", "{session_id}", url.PathEscape(sessionID)), nil, nil, nil, opts)
+}
+
+// RecordUpload calls POST /v1/record/{session_id}/upload: Upload a finished recording to object storage (optional).
+//
+// Copies the MP4 to the S3-compatible bucket configured with the
+// -upload-s3-* flags; key defaults to <session_id>.mp4 and is placed
+// under -upload-s3-prefix. unsupported when no storage is configured
+// (capabilities then lacks record_upload); a session still recording is
+// a conflict. Default timeout 10 minutes, at most 1 hour. The local file
+// is kept.
+func (c *Client) RecordUpload(ctx context.Context, sessionID string, body *RecordUploadRequest, opts ...Option) (*RecordUploadResult, error) {
+	var out RecordUploadResult
+	if err := c.do(ctx, "POST", strings.ReplaceAll("/v1/record/{session_id}/upload", "{session_id}", url.PathEscape(sessionID)), nil, body, &out, opts); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 // ExecResponse holds whichever of ExecResult or ExecDetachedResult the response carries.

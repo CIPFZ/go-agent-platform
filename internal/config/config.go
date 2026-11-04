@@ -32,6 +32,14 @@ type Config struct {
 	RecordRetention time.Duration
 	JobDir          string
 	JobRetention    time.Duration
+
+	// Optional object-storage uploader for recordings (spec 13.3).
+	UploadS3Endpoint      string
+	UploadS3Bucket        string
+	UploadS3Prefix        string
+	UploadS3AccessKeyFile string
+	UploadS3SecretKeyFile string
+	UploadS3Insecure      bool
 }
 
 // DefaultBaseDir is the per-user state root used by the defaults: the user
@@ -64,6 +72,12 @@ func Parse(args []string, output io.Writer) (*Config, error) {
 	fs.DurationVar(&cfg.RecordRetention, "record-retention", 24*time.Hour, "retention of finished recordings")
 	fs.StringVar(&cfg.JobDir, "job-dir", filepath.Join(base, "jobs"), "background command output directory")
 	fs.DurationVar(&cfg.JobRetention, "job-retention", 24*time.Hour, "retention of finished background jobs")
+	fs.StringVar(&cfg.UploadS3Endpoint, "upload-s3-endpoint", "", "optional S3-compatible endpoint (host[:port]) for record uploads")
+	fs.StringVar(&cfg.UploadS3Bucket, "upload-s3-bucket", "", "bucket for record uploads")
+	fs.StringVar(&cfg.UploadS3Prefix, "upload-s3-prefix", "", "object key prefix for record uploads")
+	fs.StringVar(&cfg.UploadS3AccessKeyFile, "upload-s3-access-key-file", "", "file holding the S3 access key, reread on every upload")
+	fs.StringVar(&cfg.UploadS3SecretKeyFile, "upload-s3-secret-key-file", "", "file holding the S3 secret key, reread on every upload")
+	fs.BoolVar(&cfg.UploadS3Insecure, "upload-s3-insecure", false, "use plain HTTP for the S3 endpoint")
 	if err := fs.Parse(args); err != nil {
 		return nil, err
 	}
