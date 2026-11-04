@@ -104,12 +104,9 @@ func TestWaylandScreenAndInput(t *testing.T) {
 	if got := strings.Join(caps.Actions, ","); got != "screen,input,exec,process,file" {
 		t.Fatalf("wayland actions = %s", got)
 	}
-	probe, _ := a.client.Probe(ctx)
-	if probe.Display.Count == 0 {
-		log, _ := os.ReadFile(filepath.Join(a.dir, "agent.log"))
-		info, err := a.client.ScreenInfo(ctx)
-		t.Logf("agent log:\n%s\nscreen/info: %+v %v", log, info, err)
-	}
+	// The harness's readiness probe is the first request after startup; it
+	// must already report the real display.
+	probe := a.firstProbe
 	if !probe.Display.Ready || probe.Display.Count != 1 || probe.Display.Primary.W != 1920 || probe.Display.Primary.H != 1080 {
 		t.Fatalf("probe display = %+v %+v", probe.Display, probe.Display.Primary)
 	}

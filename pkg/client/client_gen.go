@@ -36,7 +36,7 @@ type PrimaryDisplay struct {
 
 // DisplayStatus is the DisplayStatus schema.
 type DisplayStatus struct {
-	// False without a usable graphical session or while locked.
+	// False without a usable graphical session, while locked, or while no display can be enumerated (count is then 0); never true with count 0.
 	Ready bool `json:"ready"`
 	// True after 3 consecutive capture timeouts.
 	Degraded bool `json:"degraded"`

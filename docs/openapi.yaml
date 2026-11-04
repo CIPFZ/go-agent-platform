@@ -1215,7 +1215,7 @@ components:
       type: object
       required: [ready, degraded, count, dpi_awareness]
       properties:
-        ready: {type: boolean, description: False without a usable graphical session or while locked.}
+        ready: {type: boolean, description: "False without a usable graphical session, while locked, or while no display can be enumerated (count is then 0); never true with count 0."}
         degraded: {type: boolean, description: True after 3 consecutive capture timeouts.}
         count: {type: integer}
         dpi_awareness:

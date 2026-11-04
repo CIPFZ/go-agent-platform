@@ -24,17 +24,30 @@ func (a *API) displayStatus(ctx context.Context) protocol.DisplayStatus {
 	if !st.DisplayReady {
 		return ds
 	}
-	// Bound enumeration well inside the request timeout so a hung display
-	// still lets probe answer.
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-	if displays, err := a.screen.Displays(ctx); err == nil && len(displays) > 0 {
-		ds.Count = len(displays)
-		p := displays[0]
-		ds.Primary = &protocol.PrimaryDisplay{W: p.Bounds.W, H: p.Bounds.H, Scale: p.Scale}
+	// Enumeration may wait for the first Wayland screenshot; give it the
+	// request's time but keep a margin so probe still answers when the
+	// display hangs.
+	if deadline, ok := ctx.Deadline(); ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, deadline.Add(-enumerationMargin))
+		defer cancel()
 	}
+	displays, err := a.screen.Displays(ctx)
+	if err != nil || len(displays) == 0 {
+		// A display that cannot be enumerated cannot be captured either:
+		// report it as not ready rather than ready with zero displays.
+		ds.Ready = false
+		return ds
+	}
+	ds.Count = len(displays)
+	p := displays[0]
+	ds.Primary = &protocol.PrimaryDisplay{W: p.Bounds.W, H: p.Bounds.H, Scale: p.Scale}
 	return ds
 }
+
+// enumerationMargin is kept free of the request deadline when probe and
+// capabilities enumerate displays.
+const enumerationMargin = 250 * time.Millisecond
 
 func (a *API) probe(c *server.Call) (any, error) {
 	ctx := c.Context(timeoutSystem)

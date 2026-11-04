@@ -201,6 +201,10 @@ var (
 	sizeW      int
 	sizeH      int
 	sizeUpdate time.Time
+	// sizeFetch is closed when the screenshot taken to learn the size
+	// finishes; nil when none is running.
+	sizeFetch chan struct{}
+	sizeErr   error
 )
 
 func rememberSize(w, h int) {
@@ -213,24 +217,71 @@ func rememberSize(w, h int) {
 // screenshot refreshes it (outputs can be added or resized).
 const sizeTTL = 30 * time.Second
 
-// ScreenSize returns the desktop size in screenshot pixels, taking a
-// screenshot when the cached size is missing or stale. Wayland has no
+// fetchTimeout bounds the screenshot that learns the size; it runs on its
+// own context so an impatient caller does not cancel it for everyone.
+const fetchTimeout = 30 * time.Second
+
+// startFetch starts one background screenshot to learn the size unless one
+// is already running, and returns the channel closed when it ends. Callers
+// hold sizeMu.
+func startFetch() chan struct{} {
+	if sizeFetch != nil {
+		return sizeFetch
+	}
+	done := make(chan struct{})
+	sizeFetch = done
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
+		defer cancel()
+		_, err := Screenshot(ctx)
+		sizeMu.Lock()
+		sizeErr, sizeFetch = err, nil
+		sizeMu.Unlock()
+		close(done)
+	}()
+	return done
+}
+
+// Warm starts learning the desktop size in the background, so the first
+// probe after startup does not wait for the portal.
+func Warm() {
+	sizeMu.Lock()
+	if sizeW == 0 {
+		startFetch()
+	}
+	sizeMu.Unlock()
+}
+
+// ScreenSize returns the desktop size in screenshot pixels. Wayland has no
 // portable output-enumeration protocol for clients like vm-agent, so the
-// desktop is one display of this size (as agreed for phase 3).
+// desktop is one display of this size (as agreed for phase 3). A stale size
+// is returned at once while a background screenshot refreshes it; without
+// any size yet the caller waits for the single in-flight screenshot, up to
+// ctx.
 func ScreenSize(ctx context.Context) (int, int, error) {
 	sizeMu.Lock()
 	w, h, fresh := sizeW, sizeH, time.Since(sizeUpdate) < sizeTTL
-	sizeMu.Unlock()
-	if w > 0 && fresh {
+	if w > 0 {
+		if !fresh {
+			startFetch()
+		}
+		sizeMu.Unlock()
 		return w, h, nil
 	}
-	if _, err := Screenshot(ctx); err != nil {
-		if w > 0 {
-			return w, h, nil
-		}
-		return 0, 0, err
+	done := startFetch()
+	sizeMu.Unlock()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		return 0, 0, ctx.Err()
 	}
 	sizeMu.Lock()
 	defer sizeMu.Unlock()
+	if sizeW == 0 {
+		if sizeErr == nil {
+			sizeErr = errors.New("the screenshot portal returned no image")
+		}
+		return 0, 0, sizeErr
+	}
 	return sizeW, sizeH, nil
 }

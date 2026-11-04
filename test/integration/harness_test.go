@@ -98,6 +98,8 @@ type agent struct {
 	args   []string
 	client *client.Client
 	exited chan struct{}
+	// firstProbe is the answer to the first request the agent served.
+	firstProbe *client.ProbeResult
 }
 
 type agentOption func(*agent)
@@ -134,7 +136,8 @@ func (a *agent) start() {
 	a.client = client.New("http://" + a.addr)
 	deadline := time.Now().Add(15 * time.Second)
 	for {
-		if _, err := a.client.Probe(context.Background()); err == nil {
+		if p, err := a.client.Probe(context.Background()); err == nil {
+			a.firstProbe = p
 			return
 		}
 		select {

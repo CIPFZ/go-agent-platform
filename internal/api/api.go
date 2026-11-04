@@ -205,6 +205,16 @@ func NewWithDeps(d Deps) (*API, error) {
 	if a.screenOrigin == nil {
 		a.screenOrigin = platformOrigin
 	}
+	if a.wayland {
+		// Learn the desktop size from the portal before the first request,
+		// so the first probe reports the real display (Wayland has no
+		// output enumeration for vm-agent; the size comes from a screenshot).
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			_, _ = a.screen.Displays(ctx)
+		}()
+	}
 	go a.janitor()
 	return a, nil
 }

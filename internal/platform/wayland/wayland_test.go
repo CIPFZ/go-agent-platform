@@ -64,13 +64,15 @@ func TestActive(t *testing.T) {
 // fakePortal implements the Screenshot and RemoteDesktop request flows on
 // a private session bus.
 type fakePortal struct {
-	conn     *dbus.Conn
-	dir      string
-	mu       sync.Mutex
-	calls    []string
-	notifies []string
-	token    string // restore token the portal hands out
-	gotToken string // restore token the client sent
+	conn      *dbus.Conn
+	dir       string
+	mu        sync.Mutex
+	calls     []string
+	notifies  []string
+	token     string // restore token the portal hands out
+	gotToken  string // restore token the client sent
+	shots     int
+	shotDelay time.Duration
 }
 
 func (p *fakePortal) respond(sender dbus.Sender, token string, results map[string]dbus.Variant) dbus.ObjectPath {
@@ -90,6 +92,11 @@ func tok(opts map[string]dbus.Variant) string {
 type screenshotIface struct{ p *fakePortal }
 
 func (s screenshotIface) Screenshot(sender dbus.Sender, parent string, opts map[string]dbus.Variant) (dbus.ObjectPath, *dbus.Error) {
+	s.p.mu.Lock()
+	s.p.shots++
+	delay := s.p.shotDelay
+	s.p.mu.Unlock()
+	time.Sleep(delay)
 	img := image.NewRGBA(image.Rect(0, 0, 64, 48))
 	img.SetRGBA(10, 10, color.RGBA{255, 0, 0, 255})
 	path := filepath.Join(s.p.dir, "shot.png")
@@ -251,5 +258,70 @@ func TestRemoteDesktopNeedsAndRotatesToken(t *testing.T) {
 	p.mu.Unlock()
 	if got != "motion 42 10 5|button 272 1|keysym 16797206 1" {
 		t.Fatalf("notifies = %q", got)
+	}
+}
+
+func resetSize() {
+	sizeMu.Lock()
+	sizeW, sizeH, sizeUpdate, sizeErr = 0, 0, time.Time{}, nil
+	sizeMu.Unlock()
+}
+
+// Concurrent callers on a cold start share one screenshot, a stale size is
+// served at once while it refreshes, and Warm starts learning the size
+// without a caller.
+func TestScreenSizeSingleFlightAndWarm(t *testing.T) {
+	p := startFakePortal(t)
+	p.mu.Lock()
+	p.shotDelay = 300 * time.Millisecond
+	p.mu.Unlock()
+	resetSize()
+	defer resetSize()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var wg sync.WaitGroup
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if w, h, err := ScreenSize(ctx); err != nil || w != 64 || h != 48 {
+				t.Errorf("ScreenSize = %d %d %v", w, h, err)
+			}
+		}()
+	}
+	wg.Wait()
+	p.mu.Lock()
+	shots := p.shots
+	p.mu.Unlock()
+	if shots != 1 {
+		t.Fatalf("%d screenshots for 5 cold callers", shots)
+	}
+	sizeMu.Lock()
+	sizeUpdate = time.Now().Add(-time.Hour)
+	sizeMu.Unlock()
+	start := time.Now()
+	if w, _, err := ScreenSize(ctx); err != nil || w != 64 || time.Since(start) > 100*time.Millisecond {
+		t.Fatalf("stale size not served at once: %d %v after %s", w, err, time.Since(start))
+	}
+	resetSize()
+	Warm()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		sizeMu.Lock()
+		w := sizeW
+		sizeMu.Unlock()
+		if w == 64 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("Warm did not learn the size")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	short, cancelShort := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancelShort()
+	resetSize()
+	if _, _, err := ScreenSize(short); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("impatient caller err = %v", err)
 	}
 }
