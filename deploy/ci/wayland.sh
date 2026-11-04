@@ -6,7 +6,8 @@
 # new input devices reach the compositor: in a container run it
 # --privileged --network host -v /dev:/dev.
 # Packages: sway xdg-desktop-portal xdg-desktop-portal-wlr
-# xdg-desktop-portal-gtk pipewire wev udev dbus.
+# xdg-desktop-portal-gtk grim (the wlr backend's screenshooter) pipewire wev
+# udev dbus.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 # The runtime directory must exist before the session bus starts: portal
@@ -16,6 +17,10 @@ chmod 700 "$XDG_RUNTIME_DIR"
 if [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]]; then
 	exec dbus-run-session -- "$0" "$@"
 fi
+# Keep the stage's output so a failure anywhere can be annotated with it.
+stage_log=$(mktemp)
+exec > >(tee "$stage_log") 2>&1
+trap 'deploy/ci/annotate.sh "Wayland stage failed" "$stage_log"' ERR
 work=$(mktemp -d)
 pids=()
 cleanup() { for p in "${pids[@]}"; do kill "$p" 2>/dev/null || true; done; rm -rf "$work"; }

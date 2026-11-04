@@ -43,7 +43,7 @@ jobs:
         run: |
           if ! docker run -d --name minio -p 127.0.0.1:9000:9000 \
             -e MINIO_ROOT_USER=vmagent -e MINIO_ROOT_PASSWORD=vmagent-secret-123 \
-            minio/minio server /data >/tmp/minio.out 2>&1; then
+            minio/minio:RELEASE.2025-09-07T16-13-09Z server /data >/tmp/minio.out 2>&1; then
             deploy/ci/annotate.sh "MinIO did not start" /tmp/minio.out
             cat /tmp/minio.out
             exit 1
@@ -105,7 +105,7 @@ jobs:
               apt-get update -qq &&
               DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
                 ca-certificates git sway xdg-desktop-portal xdg-desktop-portal-wlr xdg-desktop-portal-gtk \
-                pipewire wev udev dbus procps >/dev/null &&
+                grim pipewire wev udev dbus procps >/dev/null &&
               git config --global --add safe.directory /src &&
               PATH=/usr/local/go/bin:$PATH deploy/ci/wayland.sh'
 
