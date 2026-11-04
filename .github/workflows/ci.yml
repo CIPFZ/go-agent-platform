@@ -69,6 +69,21 @@ jobs:
           VM_AGENT_RACE: "1"
         run: deploy/ci/linux-x11.sh
 
+  multi-display:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install Xorg dummy driver
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            xserver-xorg-core xserver-xorg-video-dummy x11-xserver-utils
+      - name: Multi-display matrix on Xorg dummy
+        run: deploy/ci/multi-display.sh
+
   windows:
     runs-on: windows-latest
     steps:
