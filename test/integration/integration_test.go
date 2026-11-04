@@ -379,7 +379,7 @@ func TestExecAndFilesOnRealSystem(t *testing.T) {
 	requireX(t)
 	a := startAgent(t)
 	res, err := a.client.Exec(ctx, &client.ExecRequest{Argv: []string{"sh", "-c", "echo $FOO; exit 4"}, Env: map[string]string{"FOO": "bar"}})
-	if err != nil || res.ExitCode != 4 || res.Stdout != "bar\n" {
+	if err != nil || *res.ExitCode != 4 || *res.Stdout != "bar\n" {
 		t.Fatalf("exec = %+v, %v", res, err)
 	}
 	dir := t.TempDir()

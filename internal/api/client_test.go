@@ -7,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/CIPFZ/go-agent-platform/internal/actions/window"
 	"github.com/CIPFZ/go-agent-platform/internal/protocol"
@@ -158,9 +160,39 @@ func TestGeneratedClientAgainstServer(t *testing.T) {
 	if !errors.As(err1, &apiErr) || apiErr.Code != "conflict" || !errors.As(err2, &apiErr) || apiErr.HTTPStatus != 200 || !replay.DedupHit {
 		t.Fatalf("dedup replay: %v / %v / %+v", err1, err2, replay)
 	}
-	_, err = c.Exec(ctx, &client.ExecRequest{Argv: []string{"x"}, Detach: client.Ptr(true)}, client.WithTimeout(2e9))
-	if !errors.As(err, &apiErr) || apiErr.Code != string(protocol.CodeUnsupported) {
-		t.Fatalf("detach = %v", err)
+	_, err = c.Exec(ctx, &client.ExecRequest{Argv: []string{"no-such-program-xyz"}}, client.WithTimeout(2e9))
+	if !errors.As(err, &apiErr) || apiErr.Code != string(protocol.CodeNotFound) {
+		t.Fatalf("missing program = %v", err)
+	}
+	job, err := c.Exec(ctx, &client.ExecRequest{Argv: []string{"go", "version"}, Detach: client.Ptr(true)})
+	if err != nil || job.JobID == nil || job.ExitCode != nil {
+		t.Fatalf("detached = %+v %v", job, err)
+	}
+	for {
+		j, err := c.ExecJob(ctx, *job.JobID, &client.ExecJobParams{TailBytes: client.Ptr(int64(0))})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if j.Status != "running" {
+			if j.Status != "exited" || !strings.Contains(j.Stdout, "go version") {
+				t.Fatalf("job = %+v", j)
+			}
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if jobs, err := c.ExecJobs(ctx); err != nil || len(jobs.Jobs) != 1 {
+		t.Fatalf("jobs = %+v %v", jobs, err)
+	}
+	if _, err := c.ExecJobCancel(ctx, *job.JobID); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.ExecJobDelete(ctx, *job.JobID); err != nil {
+		t.Fatal(err)
+	}
+	_, err = c.Exec(ctx, &client.ExecRequest{Argv: []string{"no-such-program-xyz"}}, client.WithTimeout(2e9))
+	if !errors.As(err, &apiErr) || apiErr.Code != string(protocol.CodeNotFound) {
+		t.Fatalf("missing program = %v", err)
 	}
 	_ = os.Remove(p)
 }

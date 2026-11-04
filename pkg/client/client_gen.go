@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -286,9 +287,9 @@ type ExecRequest struct {
 	Stdin []byte `json:"stdin,omitempty"`
 	// Per stream; at most 67108864. Default 1048576.
 	OutputLimitBytes *int64 `json:"output_limit_bytes,omitempty"`
-	// Background mode; unsupported until phase 2. Default false.
+	// Background mode; the response carries job_id instead of the result. Default false.
 	Detach *bool `json:"detach,omitempty"`
-	// Background mode only.
+	// Background mode only; kills the job after this long (reason job_timeout). Absent means no limit.
 	JobTimeoutMS *int64 `json:"job_timeout_ms,omitempty"`
 }
 
@@ -508,6 +509,49 @@ type KillResult struct {
 	Exited bool `json:"exited"`
 }
 
+// ExecDetachedResult is the ExecDetachedResult schema.
+type ExecDetachedResult struct {
+	JobID string `json:"job_id"`
+}
+
+// Job is the Job schema.
+type Job struct {
+	JobID string `json:"job_id"`
+	Argv0 string `json:"argv0"`
+	Argc  int    `json:"argc"`
+	// One of: running, exited, killed.
+	Status     string     `json:"status"`
+	ExitCode   *int       `json:"exit_code"`
+	StartedAt  time.Time  `json:"started_at"`
+	FinishedAt *time.Time `json:"finished_at"`
+	// Why a killed job was killed. One of: cancelled, job_timeout, agent_shutdown, agent_restart.
+	Reason           *string `json:"reason,omitempty"`
+	PID              int     `json:"pid"`
+	OutputLimitBytes int64   `json:"output_limit_bytes"`
+	Truncated        bool    `json:"truncated"`
+}
+
+// JobListResult is the JobListResult schema.
+type JobListResult struct {
+	Jobs []Job `json:"jobs"`
+}
+
+// JobResult is the JobResult schema.
+type JobResult struct {
+	JobID string `json:"job_id"`
+	// One of: running, exited, killed.
+	Status   string `json:"status"`
+	ExitCode *int   `json:"exit_code"`
+	Stdout   string `json:"stdout"`
+	Stderr   string `json:"stderr"`
+	// Output beyond output_limit_bytes was discarded.
+	Truncated  bool       `json:"truncated"`
+	StartedAt  time.Time  `json:"started_at"`
+	FinishedAt *time.Time `json:"finished_at"`
+	// One of: cancelled, job_timeout, agent_shutdown, agent_restart.
+	Reason *string `json:"reason,omitempty"`
+}
+
 // Operation identifies one API endpoint.
 type Operation struct {
 	ID     string
@@ -539,6 +583,10 @@ var Operations = []Operation{
 	{ID: "windowActivate", Method: "POST", Path: "/v1/window/activate"},
 	{ID: "windowClose", Method: "POST", Path: "/v1/window/close"},
 	{ID: "exec", Method: "POST", Path: "/v1/exec"},
+	{ID: "execJobs", Method: "GET", Path: "/v1/exec/jobs"},
+	{ID: "execJob", Method: "GET", Path: "/v1/exec/jobs/{job_id}"},
+	{ID: "execJobDelete", Method: "DELETE", Path: "/v1/exec/jobs/{job_id}"},
+	{ID: "execJobCancel", Method: "POST", Path: "/v1/exec/jobs/{job_id}/cancel"},
 	{ID: "processLaunch", Method: "POST", Path: "/v1/process/launch"},
 	{ID: "processOpen", Method: "POST", Path: "/v1/process/open"},
 	{ID: "processList", Method: "GET", Path: "/v1/process/list"},
@@ -746,9 +794,62 @@ func (c *Client) WindowClose(ctx context.Context, body *WindowSelector, opts ...
 // on disconnect) the whole process tree is killed. A non-zero exit code
 // is a successful response. Put an interpreter first in argv for shell
 // syntax, e.g. ["sh","-c","ls | wc -l"].
-func (c *Client) Exec(ctx context.Context, body *ExecRequest, opts ...Option) (*ExecResult, error) {
-	var out ExecResult
+//
+// With detach=true the command runs as a background job: the response
+// (default timeout 5 s) is {job_id}; output goes to the job directory,
+// capped by output_limit_bytes, and the job is queried, cancelled and
+// deleted under /v1/exec/jobs. Jobs still running when vm-agent stops
+// are killed (reason agent_shutdown, or agent_restart after a crash).
+func (c *Client) Exec(ctx context.Context, body *ExecRequest, opts ...Option) (*ExecResponse, error) {
+	var out ExecResponse
 	if err := c.do(ctx, "POST", "/v1/exec", nil, body, &out, opts); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ExecJobs calls GET /v1/exec/jobs: List background jobs, newest first.
+func (c *Client) ExecJobs(ctx context.Context, opts ...Option) (*JobListResult, error) {
+	var out JobListResult
+	if err := c.do(ctx, "GET", "/v1/exec/jobs", nil, nil, &out, opts); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ExecJobParams holds the query parameters of ExecJob.
+type ExecJobParams struct {
+	TailBytes *int64
+}
+
+// ExecJob calls GET /v1/exec/jobs/{job_id}: A job's state and output.
+func (c *Client) ExecJob(ctx context.Context, jobID string, params *ExecJobParams, opts ...Option) (*JobResult, error) {
+	q := url.Values{}
+	if params != nil {
+		if params.TailBytes != nil {
+			q.Set("tail_bytes", fmt.Sprint(*params.TailBytes))
+		}
+	}
+	var out JobResult
+	if err := c.do(ctx, "GET", strings.ReplaceAll("/v1/exec/jobs/{job_id}", "{job_id}", url.PathEscape(jobID)), q, nil, &out, opts); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ExecJobDelete calls DELETE /v1/exec/jobs/{job_id}: Delete a finished job's record and output.
+//
+// A running job is a conflict; cancel it first.
+func (c *Client) ExecJobDelete(ctx context.Context, jobID string, opts ...Option) error {
+	return c.do(ctx, "DELETE", strings.ReplaceAll("/v1/exec/jobs/{job_id}", "{job_id}", url.PathEscape(jobID)), nil, nil, nil, opts)
+}
+
+// ExecJobCancel calls POST /v1/exec/jobs/{job_id}/cancel: Kill a job's whole process tree.
+//
+// The job reports status killed with reason cancelled; cancelling a finished job changes nothing.
+func (c *Client) ExecJobCancel(ctx context.Context, jobID string, opts ...Option) (*Job, error) {
+	var out Job
+	if err := c.do(ctx, "POST", strings.ReplaceAll("/v1/exec/jobs/{job_id}/cancel", "{job_id}", url.PathEscape(jobID)), nil, nil, &out, opts); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -923,4 +1024,14 @@ func (c *Client) FileUpload(ctx context.Context, files []UploadFile, options *Up
 		return nil, err
 	}
 	return &out, nil
+}
+
+// ExecResponse holds whichever of ExecResult or ExecDetachedResult the response carries.
+type ExecResponse struct {
+	ExitCode   *int    `json:"exit_code,omitempty"`
+	Stdout     *string `json:"stdout,omitempty"`
+	Stderr     *string `json:"stderr,omitempty"`
+	Truncated  *bool   `json:"truncated,omitempty"`
+	DurationMS *int64  `json:"duration_ms,omitempty"`
+	JobID      *string `json:"job_id,omitempty"`
 }

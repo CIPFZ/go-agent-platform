@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/CIPFZ/go-agent-platform/internal/actions/exec"
 	"github.com/CIPFZ/go-agent-platform/internal/actions/file"
 	"github.com/CIPFZ/go-agent-platform/internal/actions/input"
 	"github.com/CIPFZ/go-agent-platform/internal/actions/process"
@@ -55,14 +56,19 @@ type API struct {
 	window     *window.Service
 	files      *file.FS
 	downloader *file.Downloader
+	jobs       *exec.Jobs
+
+	stopJanitor chan struct{}
+	janitorDone chan struct{}
 
 	// supervised is true when a -supervise parent started this process, so
 	// its pid is protected from process/kill.
 	supervised bool
 
-	lastInput atomic.Pointer[time.Time]
-	statsMu   sync.Mutex
-	stats     *server.Stats
+	shutdownOnce sync.Once
+	lastInput    atomic.Pointer[time.Time]
+	statsMu      sync.Mutex
+	stats        *server.Stats
 }
 
 // New builds the API with the platform backends.
@@ -101,6 +107,10 @@ func NewWithDeps(d Deps) (*API, error) {
 	if err != nil {
 		return nil, err
 	}
+	jobs, err := exec.OpenJobs(d.Config.JobDir, d.Config.JobRetention, d.Now)
+	if err != nil {
+		return nil, err
+	}
 	a := &API{
 		cfg:     d.Config,
 		audit:   d.Audit,
@@ -116,7 +126,12 @@ func NewWithDeps(d Deps) (*API, error) {
 
 		downloader: file.NewDownloader(),
 		supervised: os.Getenv(supervisor.EnvSupervised) == "1",
+		jobs:       jobs,
+
+		stopJanitor: make(chan struct{}),
+		janitorDone: make(chan struct{}),
 	}
+	go a.janitor()
 	return a, nil
 }
 
@@ -127,8 +142,34 @@ func (a *API) SetStats(s *server.Stats) {
 	a.statsMu.Unlock()
 }
 
-// Shutdown stops background activity (spec 4.4 steps 3 to 5).
-func (a *API) Shutdown() {}
+// janitorInterval is how often retention limits are applied.
+const janitorInterval = time.Minute
+
+// janitor applies the job retention (spec 6.5) in the background.
+func (a *API) janitor() {
+	defer close(a.janitorDone)
+	t := time.NewTicker(janitorInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-a.stopJanitor:
+			return
+		case <-t.C:
+			a.jobs.Prune()
+		}
+	}
+}
+
+// Shutdown stops background activity in the order of spec 4.4: running
+// background jobs are killed (reason agent_shutdown) and their records
+// written; process trees die with them.
+func (a *API) Shutdown() {
+	a.shutdownOnce.Do(func() {
+		close(a.stopJanitor)
+		<-a.janitorDone
+		a.jobs.Shutdown()
+	})
+}
 
 // Routes returns the route table.
 func (a *API) Routes() []*server.Route {
@@ -143,6 +184,7 @@ func (a *API) Routes() []*server.Route {
 	r = append(r, a.inputRoutes()...)
 	r = append(r, a.windowRoutes()...)
 	r = append(r, a.processRoutes()...)
+	r = append(r, a.jobRoutes()...)
 	r = append(r, a.fileRoutes()...)
 	return r
 }

@@ -390,6 +390,12 @@ paths:
         on disconnect) the whole process tree is killed. A non-zero exit code
         is a successful response. Put an interpreter first in argv for shell
         syntax, e.g. ["sh","-c","ls | wc -l"].
+
+        With detach=true the command runs as a background job: the response
+        (default timeout 5 s) is {job_id}; output goes to the job directory,
+        capped by output_limit_bytes, and the job is queried, cancelled and
+        deleted under /v1/exec/jobs. Jobs still running when vm-agent stops
+        are killed (reason agent_shutdown, or agent_restart after a crash).
       parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
       requestBody:
         required: true
@@ -403,7 +409,88 @@ paths:
                 allOf:
                   - $ref: '#/components/schemas/Envelope'
                   - type: object
-                    properties: {result: {$ref: '#/components/schemas/ExecResult'}}
+                    properties:
+                      result:
+                        oneOf:
+                          - $ref: '#/components/schemas/ExecResult'
+                          - $ref: '#/components/schemas/ExecDetachedResult'
+        default: {$ref: '#/components/responses/Error'}
+
+  /v1/exec/jobs:
+    get:
+      operationId: execJobs
+      tags: [process]
+      summary: List background jobs, newest first
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      responses:
+        '200':
+          description: Jobs.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties: {result: {$ref: '#/components/schemas/JobListResult'}}
+        default: {$ref: '#/components/responses/Error'}
+
+  /v1/exec/jobs/{job_id}:
+    get:
+      operationId: execJob
+      tags: [process]
+      summary: A job's state and output
+      parameters:
+        - {$ref: '#/components/parameters/RequestID'}
+        - {$ref: '#/components/parameters/TimeoutMS'}
+        - {$ref: '#/components/parameters/JobID'}
+        - name: tail_bytes
+          in: query
+          description: Bytes from the end of stdout and of stderr; 0 returns everything kept (at most output_limit_bytes).
+          schema: {type: integer, format: int64, minimum: 0, default: 65536}
+      responses:
+        '200':
+          description: Job.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties: {result: {$ref: '#/components/schemas/JobResult'}}
+        default: {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: execJobDelete
+      tags: [process]
+      summary: Delete a finished job's record and output
+      description: A running job is a conflict; cancel it first.
+      parameters:
+        - {$ref: '#/components/parameters/RequestID'}
+        - {$ref: '#/components/parameters/TimeoutMS'}
+        - {$ref: '#/components/parameters/JobID'}
+      responses:
+        '200': {$ref: '#/components/responses/Empty'}
+        default: {$ref: '#/components/responses/Error'}
+
+  /v1/exec/jobs/{job_id}/cancel:
+    post:
+      operationId: execJobCancel
+      tags: [process]
+      summary: Kill a job's whole process tree
+      description: The job reports status killed with reason cancelled; cancelling a finished job changes nothing.
+      parameters:
+        - {$ref: '#/components/parameters/RequestID'}
+        - {$ref: '#/components/parameters/TimeoutMS'}
+        - {$ref: '#/components/parameters/JobID'}
+      responses:
+        '200':
+          description: The job record after cancellation.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties: {result: {$ref: '#/components/schemas/Job'}}
         default: {$ref: '#/components/responses/Error'}
 
   /v1/process/launch:
@@ -740,6 +827,12 @@ components:
       in: header
       description: Request timeout in milliseconds, truncated to 10 minutes (1 hour for transfers).
       schema: {type: integer, format: int64, minimum: 1}
+
+    JobID:
+      name: job_id
+      in: path
+      required: true
+      schema: {type: string}
 
   headers:
     AgentVersion: {description: Service version., schema: {type: string}}
@@ -1080,8 +1173,8 @@ components:
         env_clear: {type: boolean, default: false, description: Use only env.}
         stdin: {type: string, format: byte, description: Written to stdin, which is then closed.}
         output_limit_bytes: {type: integer, format: int64, default: 1048576, description: Per stream; at most 67108864.}
-        detach: {type: boolean, default: false, description: Background mode; unsupported until phase 2.}
-        job_timeout_ms: {type: integer, format: int64, description: Background mode only.}
+        detach: {type: boolean, default: false, description: Background mode; the response carries job_id instead of the result.}
+        job_timeout_ms: {type: integer, format: int64, description: Background mode only; kills the job after this long (reason job_timeout). Absent means no limit.}
     ExecResult:
       type: object
       required: [exit_code, stdout, stderr, truncated, duration_ms]
@@ -1285,3 +1378,43 @@ components:
           items: {type: integer}
           description: Targets killed after the grace period.
         exited: {type: boolean, description: No target remains.}
+    ExecDetachedResult:
+      type: object
+      required: [job_id]
+      properties:
+        job_id: {type: string}
+    Job:
+      type: object
+      required: [job_id, argv0, argc, status, exit_code, started_at, finished_at, pid, output_limit_bytes, truncated]
+      properties:
+        job_id: {type: string}
+        argv0: {type: string}
+        argc: {type: integer}
+        status: {type: string, enum: [running, exited, killed]}
+        exit_code: {type: integer, nullable: true}
+        started_at: {type: string, format: date-time}
+        finished_at: {type: string, format: date-time, nullable: true}
+        reason: {type: string, enum: [cancelled, job_timeout, agent_shutdown, agent_restart], description: Why a killed job was killed.}
+        pid: {type: integer}
+        output_limit_bytes: {type: integer, format: int64}
+        truncated: {type: boolean}
+    JobListResult:
+      type: object
+      required: [jobs]
+      properties:
+        jobs:
+          type: array
+          items: {$ref: '#/components/schemas/Job'}
+    JobResult:
+      type: object
+      required: [job_id, status, exit_code, stdout, stderr, truncated, started_at, finished_at]
+      properties:
+        job_id: {type: string}
+        status: {type: string, enum: [running, exited, killed]}
+        exit_code: {type: integer, nullable: true}
+        stdout: {type: string}
+        stderr: {type: string}
+        truncated: {type: boolean, description: Output beyond output_limit_bytes was discarded.}
+        started_at: {type: string, format: date-time}
+        finished_at: {type: string, format: date-time, nullable: true}
+        reason: {type: string, enum: [cancelled, job_timeout, agent_shutdown, agent_restart]}

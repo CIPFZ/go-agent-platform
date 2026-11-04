@@ -107,9 +107,81 @@ func TestOpenValidation(t *testing.T) {
 	e.call("POST", "/v1/process/open", map[string]any{"path": "/definitely/missing.txt"}).code(t, protocol.CodeNotFound)
 }
 
-func TestExecDetachUnsupportedInPhase1(t *testing.T) {
+func TestBackgroundJobLifecycle(t *testing.T) {
 	e := newEnv(t)
-	e.call("POST", "/v1/exec", map[string]any{"argv": []string{"true"}, "detach": true}).code(t, protocol.CodeUnsupported)
+	var started protocol.ExecDetachedResult
+	e.call("POST", "/v1/exec", map[string]any{"argv": []string{"sh", "-c", "printf 'line1\\nline2\\n'; exit 3"}, "detach": true}).into(t, &started)
+	if !strings.HasPrefix(started.JobID, "job-") {
+		t.Fatalf("job id = %q", started.JobID)
+	}
+	var job protocol.JobResult
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		e.call("GET", "/v1/exec/jobs/"+started.JobID, nil).into(t, &job)
+		if job.Status != "running" || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if job.Status != "exited" || *job.ExitCode != 3 || job.Stdout != "line1\nline2\n" || job.FinishedAt == nil {
+		t.Fatalf("job = %+v", job)
+	}
+	e.call("GET", "/v1/exec/jobs/"+started.JobID+"?tail_bytes=6", nil).into(t, &job)
+	if job.Stdout != "line2\n" {
+		t.Fatalf("tail = %q", job.Stdout)
+	}
+	var list struct {
+		Jobs []map[string]any `json:"jobs"`
+	}
+	e.call("GET", "/v1/exec/jobs", nil).into(t, &list)
+	if len(list.Jobs) != 1 || list.Jobs[0]["job_id"] != started.JobID {
+		t.Fatalf("list = %v", list.Jobs)
+	}
+	e.call("DELETE", "/v1/exec/jobs/"+started.JobID, nil).into(t, &map[string]any{})
+	e.call("GET", "/v1/exec/jobs/"+started.JobID, nil).code(t, protocol.CodeNotFound)
+	e.call("GET", "/v1/exec/jobs/x?tail_bytes=-1", nil).code(t, protocol.CodeInvalidRequest)
+}
+
+func TestBackgroundJobCancelTimeoutAndShutdown(t *testing.T) {
+	e := newEnv(t)
+	var a, b, c protocol.ExecDetachedResult
+	e.call("POST", "/v1/exec", map[string]any{"argv": []string{"sleep", "60"}, "detach": true}).into(t, &a)
+	e.call("POST", "/v1/exec", map[string]any{"argv": []string{"sleep", "60"}, "detach": true, "job_timeout_ms": 100}).into(t, &b)
+	e.call("POST", "/v1/exec", map[string]any{"argv": []string{"sleep", "60"}, "detach": true}).into(t, &c)
+	r := e.call("DELETE", "/v1/exec/jobs/"+a.JobID, nil)
+	r.code(t, protocol.CodeConflict)
+	var cancelled map[string]any
+	e.call("POST", "/v1/exec/jobs/"+a.JobID+"/cancel", nil).into(t, &cancelled)
+	if cancelled["status"] != "killed" || cancelled["reason"] != "cancelled" {
+		t.Fatalf("cancel = %v", cancelled)
+	}
+	time.Sleep(500 * time.Millisecond)
+	var job protocol.JobResult
+	e.call("GET", "/v1/exec/jobs/"+b.JobID, nil).into(t, &job)
+	if job.Status != "killed" || job.Reason != "job_timeout" {
+		t.Fatalf("timed out job = %+v", job)
+	}
+	e.api.Shutdown()
+	e.call("GET", "/v1/exec/jobs/"+c.JobID, nil).into(t, &job)
+	if job.Status != "killed" || job.Reason != "agent_shutdown" {
+		t.Fatalf("after shutdown = %+v", job)
+	}
+	e.call("POST", "/v1/exec/jobs/nope/cancel", nil).code(t, protocol.CodeNotFound)
+}
+
+func TestJobsSurviveRestartAsKilled(t *testing.T) {
+	jobDir := t.TempDir()
+	e := newEnv(t, func(d *Deps) { d.Config.JobDir = jobDir })
+	var started protocol.ExecDetachedResult
+	e.call("POST", "/v1/exec", map[string]any{"argv": []string{"sleep", "60"}, "detach": true}).into(t, &started)
+	// A second API over the same directory sees the running record of a
+	// process it does not own, as after a crash.
+	e2 := newEnv(t, func(d *Deps) { d.Config.JobDir = jobDir })
+	var job protocol.JobResult
+	e2.call("GET", "/v1/exec/jobs/"+started.JobID, nil).into(t, &job)
+	if job.Status != "killed" || job.Reason != "agent_restart" {
+		t.Fatalf("restarted view = %+v", job)
+	}
 }
 
 func atoi(s string) int {

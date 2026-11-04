@@ -88,7 +88,10 @@ func boolean(n *yaml.Node, key string) bool { return str(n, key) == "true" }
 type generator struct {
 	root    *yaml.Node
 	buf     bytes.Buffer
+	extra   bytes.Buffer // merged oneOf structs, emitted after the operations
 	imports map[string]bool
+	merged  map[string]bool
+	current string // Go name of the operation being generated
 }
 
 func (g *generator) p(format string, args ...any) { fmt.Fprintf(&g.buf, format, args...) }
@@ -120,6 +123,7 @@ func Generate(src []byte, pkg string) ([]byte, error) {
 	}
 	out.WriteString(")\n\n")
 	out.Write(g.buf.Bytes())
+	out.Write(g.extra.Bytes())
 	formatted, err := format.Source(out.Bytes())
 	if err != nil {
 		return out.Bytes(), fmt.Errorf("format generated code: %w", err)
@@ -289,6 +293,50 @@ func (g *generator) resolveResponse(n *yaml.Node) *yaml.Node {
 	return n
 }
 
+// oneOfName registers a struct merging the object variants of a oneOf
+// result (e.g. exec's synchronous and detached results) and returns its
+// name; every field becomes optional because only one variant is present.
+func (g *generator) oneOfName(name string, variants *yaml.Node) (string, error) {
+	if g.merged == nil {
+		g.merged = map[string]bool{}
+	}
+	if g.merged[name] {
+		return name, nil
+	}
+	g.merged[name] = true
+	var doc []string
+	fields := map[string]bool{}
+	var b strings.Builder
+	fmt.Fprintf(&b, "type %s struct {\n", name)
+	schemas := get(get(g.root, "components"), "schemas")
+	for _, v := range items(variants) {
+		ref := str(v, "$ref")
+		if ref == "" {
+			return "", fmt.Errorf("oneOf variants must be references")
+		}
+		doc = append(doc, refName(ref))
+		for _, p := range pairs(get(get(schemas, refName(ref)), "properties")) {
+			field := p[0].Value
+			if fields[field] {
+				continue
+			}
+			fields[field] = true
+			t, err := g.goType(p[1], true)
+			if err != nil {
+				return "", err
+			}
+			if desc := str(p[1], "description"); desc != "" {
+				b.WriteString(comment(desc, "\t"))
+			}
+			fmt.Fprintf(&b, "\t%s %s `json:\"%s,omitempty\"`\n", goName(field), t, field)
+		}
+	}
+	b.WriteString("}\n\n")
+	g.extra.WriteString(comment(fmt.Sprintf("%s holds whichever of %s the response carries.", name, strings.Join(doc, " or ")), ""))
+	g.extra.WriteString(b.String())
+	return name, nil
+}
+
 // resultType extracts the result schema from an envelope allOf.
 func (g *generator) resultType(schema *yaml.Node) (string, error) {
 	all := get(schema, "allOf")
@@ -298,6 +346,9 @@ func (g *generator) resultType(schema *yaml.Node) (string, error) {
 	result := get(get(all.Content[1], "properties"), "result")
 	if result == nil {
 		return "", fmt.Errorf("envelope lacks result (line %d)", schema.Line)
+	}
+	if variants := get(result, "oneOf"); variants != nil {
+		return g.oneOfName(g.current+"Response", variants)
 	}
 	return g.goType(result, false)
 }
@@ -333,6 +384,7 @@ func (g *generator) operation(op operation) error {
 		return fmt.Errorf("missing operationId")
 	}
 	name := goName(op.id)
+	g.current = name
 	var pathParams, queryParams []param
 	for _, pn := range items(get(op.node, "parameters")) {
 		if ref := str(pn, "$ref"); ref != "" {

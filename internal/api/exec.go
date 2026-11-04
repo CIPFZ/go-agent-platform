@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/CIPFZ/go-agent-platform/internal/actions/exec"
+	"github.com/CIPFZ/go-agent-platform/internal/actions/file"
 	"github.com/CIPFZ/go-agent-platform/internal/actions/process"
 	"github.com/CIPFZ/go-agent-platform/internal/async"
 	"github.com/CIPFZ/go-agent-platform/internal/policy"
@@ -268,7 +269,98 @@ func (a *API) processOpen(c *server.Call) (any, error) {
 	return res, nil
 }
 
-// execDetached is the background mode, which phase 2 implements.
+// Default timeouts of spec section 7 for the background mode.
+const (
+	timeoutDetach = 5 * time.Second
+	timeoutJobs   = 5 * time.Second
+)
+
+func (a *API) jobRoutes() []*server.Route {
+	return []*server.Route{
+		{Method: "GET", Path: "/v1/exec/jobs", Action: "exec.jobs.list", Class: server.Retryable, Handler: a.jobList},
+		{Method: "GET", Path: "/v1/exec/jobs/{job_id}", Action: "exec.jobs.get", Class: server.Retryable, Handler: a.jobGet},
+		{Method: "POST", Path: "/v1/exec/jobs/{job_id}/cancel", Action: "exec.jobs.cancel", Class: server.NonRetryable, Handler: a.jobCancel},
+		{Method: "DELETE", Path: "/v1/exec/jobs/{job_id}", Action: "exec.jobs.delete", Class: server.NonRetryable, Handler: a.jobDelete},
+	}
+}
+
+// execDetached starts a background job (spec 6.5): it answers within the
+// 5 s request timeout with the job id; job_timeout_ms bounds the job.
 func (a *API) execDetached(c *server.Call, spec exec.Spec, jobTimeoutMS int64) (any, error) {
-	return nil, protocol.Unsupported("background exec (detach=true) is not available yet")
+	if err := file.CheckFreeSpace(a.cfg.JobDir); err != nil {
+		return nil, err
+	}
+	job, err := async.Run(c.Context(timeoutDetach), func() (*exec.Job, error) {
+		return a.jobs.Start(spec, time.Duration(jobTimeoutMS)*time.Millisecond)
+	})
+	if err != nil {
+		if isContextError(err) {
+			return nil, err
+		}
+		return nil, commandError(err)
+	}
+	c.Param("job_id", job.ID)
+	return protocol.ExecDetachedResult{JobID: job.ID}, nil
+}
+
+func jobError(err error) error {
+	switch {
+	case errors.Is(err, exec.ErrJobNotFound):
+		return protocol.Errorf(protocol.CodeNotFound, "%v", err)
+	case errors.Is(err, exec.ErrJobRunning):
+		return protocol.Errorf(protocol.CodeConflict, "the job is still running; cancel it first")
+	}
+	return err
+}
+
+func (a *API) jobList(c *server.Call) (any, error) {
+	_ = c.Context(timeoutJobs)
+	return map[string]any{"jobs": a.jobs.List()}, nil
+}
+
+func (a *API) jobGet(c *server.Call) (any, error) {
+	id := c.Request.PathValue("job_id")
+	tail := exec.DefaultTail
+	if raw := c.Request.URL.Query().Get("tail_bytes"); raw != "" {
+		v, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || v < 0 {
+			return nil, protocol.Errorf(protocol.CodeInvalidRequest, "tail_bytes must be a non-negative integer")
+		}
+		tail = v
+	}
+	return async.Run(c.Context(timeoutJobs), func() (*protocol.JobResult, error) {
+		job, err := a.jobs.Get(id)
+		if err != nil {
+			return nil, jobError(err)
+		}
+		stdout, stderr, err := a.jobs.Output(id, tail)
+		if err != nil {
+			return nil, jobError(err)
+		}
+		return &protocol.JobResult{
+			JobID: job.ID, Status: job.Status, ExitCode: job.ExitCode,
+			Stdout: exec.DecodeOutput(job.Argv0, stdout), Stderr: exec.DecodeOutput(job.Argv0, stderr),
+			Truncated: job.Truncated, StartedAt: job.StartedAt, FinishedAt: job.FinishedAt, Reason: job.Reason,
+		}, nil
+	})
+}
+
+func (a *API) jobCancel(c *server.Call) (any, error) {
+	id := c.Request.PathValue("job_id")
+	c.Param("job_id", id)
+	job, err := async.Run(c.Context(timeoutJobs), func() (*exec.Job, error) { return a.jobs.Cancel(id) })
+	if err != nil {
+		return nil, jobError(err)
+	}
+	return job, nil
+}
+
+func (a *API) jobDelete(c *server.Call) (any, error) {
+	id := c.Request.PathValue("job_id")
+	c.Param("job_id", id)
+	_, err := async.Run(c.Context(timeoutJobs), func() (struct{}, error) { return struct{}{}, a.jobs.Delete(id) })
+	if err != nil {
+		return nil, jobError(err)
+	}
+	return protocol.Empty{}, nil
 }

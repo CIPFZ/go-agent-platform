@@ -1,5 +1,7 @@
 package protocol
 
+import "time"
+
 // ExecRequest is the body of POST /v1/exec (spec section 6.5).
 type ExecRequest struct {
 	Argv             []string          `json:"argv"`
@@ -48,4 +50,22 @@ type KillRequest struct {
 	Tree    bool `json:"tree"`
 	GraceMS *int `json:"grace_ms"`
 	Force   bool `json:"force"`
+}
+
+// ExecDetachedResult is the result of exec with detach=true.
+type ExecDetachedResult struct {
+	JobID string `json:"job_id"`
+}
+
+// JobResult is the result of GET /v1/exec/jobs/{job_id}.
+type JobResult struct {
+	JobID      string     `json:"job_id"`
+	Status     string     `json:"status"`
+	ExitCode   *int       `json:"exit_code"`
+	Stdout     string     `json:"stdout"`
+	Stderr     string     `json:"stderr"`
+	Truncated  bool       `json:"truncated"`
+	StartedAt  time.Time  `json:"started_at"`
+	FinishedAt *time.Time `json:"finished_at"`
+	Reason     string     `json:"reason,omitempty"`
 }
