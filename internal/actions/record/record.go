@@ -503,14 +503,19 @@ func FindFFmpeg(configured string) (string, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	encoders, err := exec.CommandContext(ctx, path, "-hide_banner", "-encoders").Output()
+	probe := func(arg string) ([]byte, error) {
+		cmd := exec.CommandContext(ctx, path, "-hide_banner", arg)
+		process.HideConsole(cmd)
+		return cmd.Output()
+	}
+	encoders, err := probe("-encoders")
 	if err != nil {
 		return "", fmt.Errorf("run %s: %w", path, err)
 	}
 	if !bytes.Contains(encoders, []byte("libx264")) {
 		return "", fmt.Errorf("%s lacks the libx264 encoder", path)
 	}
-	devices, err := exec.CommandContext(ctx, path, "-hide_banner", "-devices").Output()
+	devices, err := probe("-devices")
 	if err != nil || !bytes.Contains(devices, []byte(grabberName)) {
 		return "", fmt.Errorf("%s lacks the %s input device", path, grabberName)
 	}

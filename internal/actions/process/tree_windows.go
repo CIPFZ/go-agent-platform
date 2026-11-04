@@ -45,6 +45,7 @@ func (t *Tree) start() error {
 		t.cmd.SysProcAttr = &syscall.SysProcAttr{}
 	}
 	t.cmd.SysProcAttr.CreationFlags |= windows.CREATE_SUSPENDED
+	HideConsole(t.cmd)
 	if t.cmd.WaitDelay == 0 {
 		t.cmd.WaitDelay = time.Second
 	}
