@@ -54,12 +54,21 @@ func TestCollectFromMousepad(t *testing.T) {
 	if target.ID == "" {
 		t.Fatal("mousepad window not found")
 	}
-	time.Sleep(time.Second)
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	res, err := Collect(ctx, Request{Target: target, MaxDepth: 30, MaxNodes: 2000})
-	if err != nil {
-		t.Fatal(err)
+	// The application registers with AT-SPI and builds its tree
+	// asynchronously after mapping its window; retry until the text shows.
+	var res *Result
+	var err error
+	for {
+		res, err = Collect(ctx, Request{Target: target, MaxDepth: 30, MaxNodes: 2000})
+		if err == nil && res.Root.Rect != nil && strings.Contains(fmtTree(res.Root), "accessible text") {
+			break
+		}
+		if ctx.Err() != nil {
+			t.Fatalf("tree never complete: %+v %v", res, err)
+		}
+		time.Sleep(250 * time.Millisecond)
 	}
 	if res.Root.Role != "frame" || !strings.Contains(res.Root.Name, "a11y-doc.txt") || res.Root.Rect == nil || res.Nodes < 5 {
 		t.Fatalf("root = %+v nodes %d", res.Root, res.Nodes)
@@ -126,4 +135,12 @@ func hex(v uint32) string {
 		v >>= 4
 	}
 	return string(out)
+}
+
+func fmtTree(n *Node) string {
+	out := n.Value
+	for _, c := range n.Children {
+		out += "\n" + fmtTree(c)
+	}
+	return out
 }

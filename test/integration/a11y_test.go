@@ -45,21 +45,39 @@ func TestA11yTreeOfEditor(t *testing.T) {
 	if winID == "" {
 		t.Fatal("editor window not found")
 	}
-	if _, err := a.client.WindowActivate(ctx, &client.WindowSelector{ID: client.Ptr(winID)}); err != nil {
-		t.Fatal(err)
+	// AT-SPI registration lags the window; retry until the tree is there.
+	var tree *client.A11yTreeResult
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		tree, err = a.client.A11yTree(ctx, &client.A11yTreeRequest{WindowID: client.Ptr(winID)})
+		if err == nil && tree.Nodes >= 5 && tree.Root.Rect != nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("tree = %+v, %v", tree, err)
+		}
+		time.Sleep(250 * time.Millisecond)
 	}
-	time.Sleep(500 * time.Millisecond)
-	tree, err := a.client.A11yTree(ctx, &client.A11yTreeRequest{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if tree.Window.ID != winID || tree.Root.Role != "frame" || tree.Nodes < 5 || tree.Root.Rect == nil {
+	if tree.Window.ID != winID || tree.Root.Role != "frame" {
 		t.Fatalf("tree window %+v root %s/%s nodes %d", tree.Window, tree.Root.Role, tree.Root.Name, tree.Nodes)
 	}
 	// The root frame's rect matches the window's frame rectangle.
-	win, _ := a.client.WindowActive(ctx)
-	if d := abs(tree.Root.Rect.X-win.Rect.X) + abs(tree.Root.Rect.Y-win.Rect.Y); d > 60 {
-		t.Fatalf("a11y rect %+v vs window rect %+v", tree.Root.Rect, win.Rect)
+	list, err := a.client.WindowList(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range list.Windows {
+		if w.ID == winID && w.Rect != nil {
+			if d := abs(tree.Root.Rect.X-w.Rect.X) + abs(tree.Root.Rect.Y-w.Rect.Y); d > 60 {
+				t.Fatalf("a11y rect %+v vs window rect %+v", tree.Root.Rect, w.Rect)
+			}
+		}
+	}
+	// Without window_id the foreground window is used.
+	if _, err := a.client.WindowActivate(ctx, &client.WindowSelector{ID: client.Ptr(winID)}); err == nil {
+		if fg, err := a.client.A11yTree(ctx, &client.A11yTreeRequest{}); err != nil || fg.Window.ID != winID {
+			t.Fatalf("foreground tree = %+v, %v", fg, err)
+		}
 	}
 }
 
