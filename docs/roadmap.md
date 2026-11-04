@@ -22,9 +22,9 @@ HTTP 骨架与直通鉴权位、审计、去重、`probe`、`capabilities`、`sc
 
 以下验收在开发环境中无法执行，需在目标 VM 上运行脚本确认：
 
-- Windows 10/11：`deploy/windows-e2e.ps1` 在 100%、125%、150% 缩放下的点击误差、截图延迟、锁屏、重启与 Notepad 回归；安装、升级、回滚脚本。
+- Windows 10/11：`deploy/windows-e2e.ps1` 在 100%、125%、150% 缩放下的点击误差、截图延迟、锁屏、重启与 Notepad 回归；安装、升级、回滚脚本。以上各项已在 Windows Server 2022（10.0.20348）真实 VM 上通过，10/11 仍待验证。
 - 24 小时稳定性：`test/soak` 在最终构建上的完整运行（Linux 与 Windows 各一次）。
 - 真实桌面环境（GNOME 等）的锁屏检测与剪贴板管理器交互。
-- Windows 上的 `a11y/tree`（UI Automation 脚本只做了语法与转义检查）。
+- Windows 10/11 上的 `a11y/tree`（原生 UI Automation 实现已在 Windows Server 2022 上用 Notepad 与 Explorer 验证）。
 - GNOME/KDE Wayland 会话：Screenshot portal 的权限行为，以及 RemoteDesktop 回退路径（只对伪造的 portal 测试过调用序列）。
 - Windows 多显示器与混合 DPI。

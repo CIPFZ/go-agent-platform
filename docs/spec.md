@@ -517,6 +517,8 @@ VM 是隔离单元。`vm-agent` 以桌面用户身份运行，权限等同该用
 5. 锁屏时 `probe` 正确上报且输入接口返回 `no_display`。
 6. `vm-agent` 重启后由 `launch` 启动的程序仍在运行，`exec` 启动的命令已被清理。
 
+Windows 验证范围：以上验收及阶段 2、3 的 Windows 项（安装、升级、回滚、`-supervise` 重启、剪贴板、录屏、`a11y/tree`）已在 Windows Server 2022 Datacenter（10.0.20348，单显示器，100%/125%/150% 缩放）的真实 VM 上验证通过。Windows 10/11 尚未验证，Server 上的结果不代表 10/11 已通过；Windows 多显示器与混合 DPI 同样未验证。
+
 ### 阶段 2：补齐操作面与交付
 
 范围：`file/*` 其余接口、`upload`、`clipboard`（Linux 的 X selection 纯 Go 实现若工时超预期，允许延后到阶段 3，期间 Linux 的 `capabilities` 不上报 `clipboard`）、`process/list|kill`、`exec` 后台模式与 `exec/jobs/*`、`window/resize|close_all`、`record/*`、`metrics`、Windows 计划任务与 Linux user service 安装脚本、会话前置条件配置脚本、升级回滚、`legacy/` 清理。
