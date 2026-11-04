@@ -14,7 +14,7 @@
 | 头 | 说明 |
 | --- | --- |
 | `X-Request-Id` | 可选，16 到 128 个 `[A-Za-z0-9._-]`；用于审计关联与去重 |
-| `X-Timeout-Ms` | 可选，覆盖默认超时；一般接口截断到 600000，`file/download`、`file/upload`、`record/{id}` 下载截断到 3600000 |
+| `X-Timeout-Ms` | 可选，覆盖默认超时；一般接口截断到 600000，`file/download`、`file/upload`、`record/{id}` 下载与 `record/{id}/upload` 截断到 3600000 |
 
 ## 响应
 
@@ -67,7 +67,7 @@
 | `file/*` | 30 秒；`file/read`、`file/remove` 60 秒；`file/download`、`file/upload` 10 分钟 |
 | `process/*` | 10 秒，`kill` 另加 `grace_ms` |
 | `exec/jobs/*` | 5 秒 |
-| `record/start`、`record/stop` | 10 秒；`record/{id}` 下载 10 分钟 |
+| `record/start`、`record/stop` | 10 秒；`record/{id}` 下载与 `record/{id}/upload` 10 分钟 |
 | `probe`、`capabilities`、`metrics`、`file/known_dirs` | 5 秒 |
 | `a11y/tree` | 15 秒 |
 
@@ -82,7 +82,7 @@
 | 命令与进程 | `POST /v1/exec`、`GET /v1/exec/jobs`、`GET|DELETE /v1/exec/jobs/{job_id}`、`POST /v1/exec/jobs/{job_id}/cancel`、`POST /v1/process/{launch,open,kill}`、`GET /v1/process/list` |
 | 文件 | `POST /v1/file/{read,write,upload,stat,list,mkdir,remove,move,copy,download}`、`GET /v1/file/known_dirs` |
 | 剪贴板 | `GET /v1/clipboard`、`POST /v1/clipboard` |
-| 录屏 | `POST /v1/record/{start,stop}`、`GET /v1/record/list`、`GET|DELETE /v1/record/{session_id}` |
+| 录屏 | `POST /v1/record/{start,stop}`、`GET /v1/record/list`、`GET|DELETE /v1/record/{session_id}`、`POST /v1/record/{session_id}/upload`（可选，需 `-upload-s3-*`） |
 | 无障碍 | `POST /v1/a11y/tree`（阶段 3） |
 
 Wayland 会话（阶段 3）只提供 `screen/capture`、`screen/info` 与 `input/*`：截图经 xdg-desktop-portal Screenshot，整个桌面作为一个显示器上报，光标位置不可得（截图不叠加光标，`cursor` 为 0,0；`screen/cursor` 返回 `unsupported`）；输入经 uinput 虚拟设备，文本限于美式布局的可打印 ASCII，若 uinput 不可写而存在 portal RemoteDesktop 的 restore token，则改用 portal（可输入任意字符）。`window/*`、`clipboard`、`record/*`、`a11y/tree` 返回 `unsupported`，`capabilities.actions` 也不含它们。

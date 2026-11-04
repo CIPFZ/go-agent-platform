@@ -136,7 +136,15 @@ Windows 进程启动后首先调用 `SetProcessDpiAwarenessContext(DPI_AWARENESS
 -record-retention   已完成录像保留时长，默认 24h，与配额任一触发即清理
 -job-dir            后台命令输出目录，默认用户临时目录下 vm-agent/jobs
 -job-retention      已完成 job 保留时长，默认 24h
+-upload-s3-endpoint  可选，录像上传的 S3 兼容端点，host[:port]，也可写 http:// 或 https:// 前缀；为空表示不启用上传，见 6.8
+-upload-s3-bucket    上传目标 bucket，启用上传时必填
+-upload-s3-prefix    可选，对象键前缀，不得含空段、. 或 ..
+-upload-s3-access-key-file  存放访问密钥的文件，启用上传时必填，每次上传重新读取
+-upload-s3-secret-key-file  存放私钥的文件，启用上传时必填，每次上传重新读取
+-upload-s3-insecure  使用明文 HTTP 连接端点，默认关闭，仅用于受信任的内网
 ```
+
+启用上传时上述参数在启动时校验（不连接端点），不合法则拒绝启动。密钥只通过文件传入，不出现在命令行与审计中。
 
 ### 4.4 优雅关闭
 
@@ -168,7 +176,7 @@ JSON 请求体上限 8 MiB，超出返回 `too_large`。大文件写入使用 `f
 | 头 | 说明 |
 | --- | --- |
 | `X-Request-Id` | 调用方生成，用于审计关联与去重，可选。格式为 16 到 128 个 `[A-Za-z0-9._-]` 字符，不符返回 `invalid_request` |
-| `X-Timeout-Ms` | 本次请求超时，缺省按动作默认值，见第 7 节。硬上限：一般同步请求 10 分钟；`file/download`、`file/upload`、`record/{id}` 下载 1 小时；超出按上限截断 |
+| `X-Timeout-Ms` | 本次请求超时，缺省按动作默认值，见第 7 节。硬上限：一般同步请求 10 分钟；`file/download`、`file/upload`、`record/{id}` 下载与 `record/{id}/upload` 1 小时；超出按上限截断 |
 
 HTTP 服务器参数：`ReadHeaderTimeout` 10 秒，`IdleTimeout` 120 秒，`MaxHeaderBytes` 64 KiB，请求体读取受第 5.1 节上限约束。
 
@@ -348,8 +356,20 @@ Windows 前台激活顺序：`ShowWindow(SW_RESTORE)` 若最小化；`SetForegro
 | GET | `/v1/record/{session_id}` | | 流式返回 mp4 |
 | DELETE | `/v1/record/{session_id}` | | 删除录像 |
 | GET | `/v1/record/list` | | 进行中与已完成的会话 |
+| POST | `/v1/record/{session_id}/upload` | `key` 可选，对象键，相对 `-upload-s3-prefix`，默认 `<session_id>.mp4` | `session_id`、`bucket`、`key`（含前缀的完整对象键）、`size`、`etag`、`sha256`（本地录像文件的 sha256） |
 
 同一时刻只允许一个进行中的录制，重复 start 返回 `conflict`。ffmpeg 进入 Job；stop 时向其 stdin 写 `q` 并等待正常退出，上限 5 秒后强杀。ffmpeg 输出参数固定包含 `-movflags +frag_keyframe+empty_moov`，保证进程被强杀时文件仍可播放。服务退出时的处理顺序见 4.4。录像存于 `-record-dir`，总量超过 `-record-quota` 或已完成会话超过 `-record-retention` 时按最旧删除，两个条件任一触发即清理；调用方应在 stop 后尽快下载。ffmpeg 缺失时 `capabilities` 不含 `record`。
+
+上传（阶段 3，可选）：`record/{session_id}/upload` 把已完成的录像流式上传到 4.3 中 `-upload-s3-*` 配置的 S3 兼容对象存储，大文件自动分片上传，本地文件保留，仍受配额与保留期清理。上传不依赖桌面会话与 ffmpeg；配置了上传时 `capabilities.actions` 含 `record_upload`，否则不含，接口返回 `unsupported`。默认超时 10 分钟，属于传输类接口，`X-Timeout-Ms` 硬上限 1 小时（见 5.3）；不可重试，带 `X-Request-Id` 时按 5.6 去重。错误：
+
+| 情形 | code |
+| --- | --- |
+| 未配置对象存储 | `unsupported` |
+| `session_id` 不存在 | `not_found` |
+| 会话仍在录制 | `conflict` |
+| `key` 为空、以 `/` 开头、含反斜杠或 NUL，或含空段、`.`、`..` 路径段 | `invalid_request` |
+| 读取密钥文件失败、端点不可达、对象存储拒绝 | `io_failed` |
+| 超时或调用方断开 | `timeout` |
 
 ### 6.9 无障碍树（阶段 3，可选）
 
@@ -420,7 +440,7 @@ VM 是隔离单元。`vm-agent` 以桌面用户身份运行，权限等同该用
 }
 ```
 
-`sync_timeout_max_ms` 适用于除传输类以外的全部接口；`transfer_timeout_max_ms` 适用于 `file/download`、`file/upload`、`record/{id}` 下载。`a11y_max_depth`、`a11y_max_nodes` 是 `a11y/tree` 请求中 `max_depth`、`max_nodes` 的上限，与 `a11y` 是否在 `actions` 中无关，始终上报。
+`sync_timeout_max_ms` 适用于除传输类以外的全部接口；`transfer_timeout_max_ms` 适用于 `file/download`、`file/upload`、`record/{id}` 下载与 `record/{id}/upload`。`a11y_max_depth`、`a11y_max_nodes` 是 `a11y/tree` 请求中 `max_depth`、`max_nodes` 的上限，与 `a11y` 是否在 `actions` 中无关，始终上报。
 
 无桌面会话或已锁屏时 `display.ready` 为 false，`actions` 不含 `screen`、`input`、`window`、`clipboard`、`record`，对应接口返回 `no_display`。
 
