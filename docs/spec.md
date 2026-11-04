@@ -555,3 +555,4 @@ VM 是隔离单元。`vm-agent` 以桌面用户身份运行，权限等同该用
 | 鉴权与 TLS | 当前不实现，预留中间件位置，由部署拓扑决定是否需要，见 D9 |
 | 是否预留向外部注册自身地址的接口 | 不预留，平台已知每台 VM 的 IP |
 | Linux 剪贴板工时风险 | 允许延后到阶段 3，期间 `capabilities` 不上报 |
+| Linux 剪贴板是否延后 | 未延后，阶段 2 已完成：纯 Go 的 X selection owner / requestor（大数据走 INCR），文本与 PNG 读写，`capabilities` 自阶段 2 起上报 `clipboard`；阶段 3 无剩余工作 |
