@@ -64,7 +64,7 @@ function Stop-Agent([string]$TaskName, [int]$TimeoutSeconds = 30) {
         Stop-Process -Id $supervisor -Force -ErrorAction SilentlyContinue
     }
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-    while ((Get-AgentProcesses).Count -gt 0 -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 250 }
+    while (@(Get-AgentProcesses).Count -gt 0 -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 250 }
     foreach ($p in Get-AgentProcesses) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }
     if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
         Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
