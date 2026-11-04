@@ -66,7 +66,9 @@ type RECT struct{ Left, Top, Right, Bottom int32 }
 type POINT struct{ X, Y int32 }
 
 // Call invokes a lazily loaded procedure, returning ERROR_PROC_NOT_FOUND
-// when the running Windows version lacks it. Like LazyProc.Call, pointer
+// when the running Windows version lacks it. Otherwise the error is the
+// thread's last error and is never nil, even on success: judge success by
+// the return value (see HResult for COM-style functions). Like LazyProc.Call, pointer
 // arguments must be converted with uintptr(unsafe.Pointer(p)) inside the call
 // expression; uintptrescapes keeps them alive for the duration of the call.
 //
@@ -77,6 +79,18 @@ func Call(p *windows.LazyProc, args ...uintptr) (uintptr, error) {
 	}
 	r, _, err := p.Call(args...)
 	return r, err
+}
+
+// HResult calls a function returning an HRESULT and reports whether it
+// returned S_OK; a function missing from this Windows version fails.
+//
+//go:uintptrescapes
+func HResult(p *windows.LazyProc, args ...uintptr) bool {
+	if p.Find() != nil {
+		return false
+	}
+	hr, _, _ := p.Call(args...)
+	return hr == 0
 }
 
 // lastErr returns e unless it is the zero errno that Call reports on success.

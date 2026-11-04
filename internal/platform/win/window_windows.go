@@ -87,8 +87,7 @@ func IsZoomed(h HWND) bool  { return boolCall(procIsZoomed, h) }
 // IsCloaked reports DWM cloaking (hidden UWP frames, other virtual desktops).
 func IsCloaked(h HWND) bool {
 	var cloaked uint32
-	hr, err := Call(procDwmGetWindowAttribute, uintptr(h), dwmaCloaked, uintptr(unsafe.Pointer(&cloaked)), unsafe.Sizeof(cloaked))
-	return err == nil && hr == 0 && cloaked != 0
+	return HResult(procDwmGetWindowAttribute, uintptr(h), dwmaCloaked, uintptr(unsafe.Pointer(&cloaked)), unsafe.Sizeof(cloaked)) && cloaked != 0
 }
 
 // IsToolWindow reports WS_EX_TOOLWINDOW.
@@ -127,7 +126,7 @@ func ThreadProcess(h HWND) (thread, pid uint32) {
 // (which exclude the invisible resize borders) or GetWindowRect.
 func FrameRect(h HWND) (RECT, bool) {
 	var r RECT
-	if hr, err := Call(procDwmGetWindowAttribute, uintptr(h), dwmaExtendedFrame, uintptr(unsafe.Pointer(&r)), unsafe.Sizeof(r)); err == nil && hr == 0 {
+	if HResult(procDwmGetWindowAttribute, uintptr(h), dwmaExtendedFrame, uintptr(unsafe.Pointer(&r)), unsafe.Sizeof(r)) {
 		return r, true
 	}
 	return WindowRect(h)

@@ -42,8 +42,7 @@ func InitDPIAwareness() string {
 func DPIAwareness() string { return InitDPIAwareness() }
 
 func currentDPIAwareness() string {
-	ctx, err := Call(procGetThreadDpiAwarenessContext)
-	if err == nil && ctx != 0 {
+	if ctx, _ := Call(procGetThreadDpiAwarenessContext); ctx != 0 {
 		for _, c := range []struct {
 			ctx  uintptr
 			name string
@@ -92,7 +91,7 @@ var (
 		}
 		scale := 1.0
 		var dpiX, dpiY uint32
-		if hr, err := Call(procGetDpiForMonitor, hmon, 0 /* MDT_EFFECTIVE_DPI */, uintptr(unsafe.Pointer(&dpiX)), uintptr(unsafe.Pointer(&dpiY))); err == nil && hr == 0 && dpiX > 0 {
+		if HResult(procGetDpiForMonitor, hmon, 0 /* MDT_EFFECTIVE_DPI */, uintptr(unsafe.Pointer(&dpiX)), uintptr(unsafe.Pointer(&dpiY))) && dpiX > 0 {
 			scale = float64(dpiX) / 96
 		}
 		monitorList = append(monitorList, Monitor{Rect: info.rcMonitor, Scale: scale, Primary: info.dwFlags&monitorInfoPrimary != 0})
