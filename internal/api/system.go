@@ -85,8 +85,8 @@ func (a *API) actions(displayReady bool) []string {
 	for _, g := range []struct {
 		name    string
 		display bool
-	}{{"screen", true}, {"input", true}, {"window", true}, {"exec", false}, {"process", false}, {"file", false}, {"clipboard", true}} {
-		if displayReady || !g.display {
+	}{{"screen", true}, {"input", true}, {"window", true}, {"exec", false}, {"process", false}, {"file", false}, {"clipboard", true}, {"record", true}} {
+		if (displayReady || !g.display) && (g.name != "record" || a.recorder.Available()) {
 			out = append(out, g.name)
 		}
 	}

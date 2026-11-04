@@ -44,7 +44,7 @@ func TestProbeAndCapabilitiesOnX11(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(caps.Actions, ",") != "screen,input,window,exec,process,file,clipboard" {
+	if got := strings.TrimSuffix(strings.Join(caps.Actions, ","), ",record"); got != "screen,input,window,exec,process,file,clipboard" {
 		t.Fatalf("actions = %v", caps.Actions)
 	}
 }

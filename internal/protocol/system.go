@@ -175,3 +175,17 @@ type ClipboardWriteRequest struct {
 	Text  *string `json:"text"`
 	Image *string `json:"image"`
 }
+
+// RecordStartRequest is the body of POST /v1/record/start.
+type RecordStartRequest struct {
+	FPS     *int   `json:"fps"`
+	Display *int   `json:"display"`
+	Region  *Rect  `json:"region"`
+	Preset  string `json:"preset"`
+	CRF     *int   `json:"crf"`
+}
+
+// RecordStopRequest is the body of POST /v1/record/stop.
+type RecordStopRequest struct {
+	SessionID string `json:"session_id"`
+}

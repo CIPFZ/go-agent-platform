@@ -6,6 +6,7 @@ package api
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -18,6 +19,7 @@ import (
 	"github.com/CIPFZ/go-agent-platform/internal/actions/file"
 	"github.com/CIPFZ/go-agent-platform/internal/actions/input"
 	"github.com/CIPFZ/go-agent-platform/internal/actions/process"
+	"github.com/CIPFZ/go-agent-platform/internal/actions/record"
 	"github.com/CIPFZ/go-agent-platform/internal/actions/screen"
 	"github.com/CIPFZ/go-agent-platform/internal/actions/session"
 	"github.com/CIPFZ/go-agent-platform/internal/actions/window"
@@ -31,16 +33,20 @@ import (
 
 // Deps are the platform-facing dependencies; tests substitute fakes.
 type Deps struct {
-	Config       *config.Config
-	Audit        audit.Sink
-	Screen       screen.Backend
-	Input        input.Backend
-	Window       window.Backend
-	Clipboard    clipboard.Backend
-	Session      func() session.State
-	DPIAwareness string
-	Policy       *policy.Policy
-	Now          func() time.Time
+	Config    *config.Config
+	Audit     audit.Sink
+	Screen    screen.Backend
+	Input     input.Backend
+	Window    window.Backend
+	Clipboard clipboard.Backend
+	// FFmpeg is the resolved ffmpeg executable; empty disables recording.
+	FFmpeg string
+	// RecordGrabArgs overrides ffmpeg's input arguments (tests).
+	RecordGrabArgs func(fps int, r protocol.Rect) ([]string, error)
+	Session        func() session.State
+	DPIAwareness   string
+	Policy         *policy.Policy
+	Now            func() time.Time
 }
 
 // API holds the services behind the routes.
@@ -60,6 +66,7 @@ type API struct {
 	files      *file.FS
 	downloader *file.Downloader
 	jobs       *exec.Jobs
+	recorder   *record.Recorder
 
 	stopJanitor chan struct{}
 	janitorDone chan struct{}
@@ -89,7 +96,12 @@ func New(cfg *config.Config, sink audit.Sink) (*API, error) {
 	if err := process.TrackTrees(treeDir); err != nil {
 		return nil, err
 	}
+	ffmpeg, ffErr := record.FindFFmpeg(cfg.FFmpeg)
+	if ffErr != nil {
+		log.Printf("vm-agent: recording unavailable: %v", ffErr)
+	}
 	return NewWithDeps(Deps{
+		FFmpeg:       ffmpeg,
 		Config:       cfg,
 		Audit:        sink,
 		Screen:       screen.NewBackend(),
@@ -115,6 +127,13 @@ func NewWithDeps(d Deps) (*API, error) {
 	if err != nil {
 		return nil, err
 	}
+	recorder, err := record.Open(d.Config.RecordDir, d.FFmpeg, d.Config.RecordQuota, d.Config.RecordRetention, d.Now)
+	if err != nil {
+		return nil, err
+	}
+	if d.RecordGrabArgs != nil {
+		recorder.SetGrabArgs(d.RecordGrabArgs)
+	}
 	a := &API{
 		cfg:     d.Config,
 		audit:   d.Audit,
@@ -133,6 +152,7 @@ func NewWithDeps(d Deps) (*API, error) {
 		downloader: file.NewDownloader(),
 		supervised: os.Getenv(supervisor.EnvSupervised) == "1",
 		jobs:       jobs,
+		recorder:   recorder,
 
 		stopJanitor: make(chan struct{}),
 		janitorDone: make(chan struct{}),
@@ -151,7 +171,8 @@ func (a *API) SetStats(s *server.Stats) {
 // janitorInterval is how often retention limits are applied.
 const janitorInterval = time.Minute
 
-// janitor applies the job retention (spec 6.5) in the background.
+// janitor applies the job and recording retention and quota (spec 6.5,
+// 6.8) in the background.
 func (a *API) janitor() {
 	defer close(a.janitorDone)
 	t := time.NewTicker(janitorInterval)
@@ -162,18 +183,21 @@ func (a *API) janitor() {
 			return
 		case <-t.C:
 			a.jobs.Prune()
+			a.recorder.Prune()
 		}
 	}
 }
 
-// Shutdown stops background activity in the order of spec 4.4: running
-// background jobs are killed (reason agent_shutdown) and their records
-// written; process trees die with them.
+// Shutdown stops background activity in the order of spec 4.4: an active
+// recording is stopped with "q" (5 s limit) so its file is complete, then
+// running background jobs are killed (reason agent_shutdown) and their
+// records written; process trees die with them.
 func (a *API) Shutdown() {
 	a.shutdownOnce.Do(func() {
 		close(a.stopJanitor)
 		<-a.janitorDone
-		a.jobs.Shutdown()
+		a.recorder.Shutdown() // step 3: finish recordings cleanly
+		a.jobs.Shutdown()     // step 4: kill background jobs
 	})
 }
 
@@ -193,6 +217,7 @@ func (a *API) Routes() []*server.Route {
 	r = append(r, a.processRoutes()...)
 	r = append(r, a.jobRoutes()...)
 	r = append(r, a.clipboardRoutes()...)
+	r = append(r, a.recordRoutes()...)
 	r = append(r, a.fileRoutes()...)
 	return r
 }

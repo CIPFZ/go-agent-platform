@@ -34,6 +34,7 @@ tags:
   - name: process
   - name: file
   - name: clipboard
+  - name: record
 
 paths:
   /v1/probe:
@@ -918,6 +919,113 @@ paths:
         '200': {$ref: '#/components/responses/Empty'}
         default: {$ref: '#/components/responses/Error'}
 
+  /v1/record/start:
+    post:
+      operationId: recordStart
+      tags: [record]
+      summary: Start recording the screen with ffmpeg
+      description: |
+        One recording at a time; a second start is a conflict. The area is
+        chosen like screen/capture (display 0 by default, -1 the virtual
+        desktop, region clipped) and rounded down to even dimensions.
+        ffmpeg runs with libx264, yuv420p and -movflags
+        +frag_keyframe+empty_moov, so the file stays playable even if ffmpeg
+        is killed. unsupported when no usable ffmpeg was found. Default
+        timeout 10 s.
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/RecordStartRequest'}}}
+      responses:
+        '200':
+          description: Recording.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties: {result: {$ref: '#/components/schemas/RecordStartResult'}}
+        default: {$ref: '#/components/responses/Error'}
+
+  /v1/record/stop:
+    post:
+      operationId: recordStop
+      tags: [record]
+      summary: Stop a recording
+      description: |
+        Sends q to ffmpeg and waits up to 5 s for it to finish the file, then
+        kills it. Stopping a finished session returns its result again.
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/RecordStopRequest'}}}
+      responses:
+        '200':
+          description: The finished recording.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties: {result: {$ref: '#/components/schemas/RecordStopResult'}}
+        default: {$ref: '#/components/responses/Error'}
+
+  /v1/record/list:
+    get:
+      operationId: recordList
+      tags: [record]
+      summary: Recording sessions, newest first
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      responses:
+        '200':
+          description: Sessions.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties: {result: {$ref: '#/components/schemas/RecordListResult'}}
+        default: {$ref: '#/components/responses/Error'}
+
+  /v1/record/{session_id}:
+    get:
+      operationId: recordDownload
+      tags: [record]
+      summary: Download a finished recording
+      description: |
+        Streams the MP4 with X-Result-Size and X-Result-Sha256. A session
+        still recording is a conflict. Default timeout 10 minutes, at most
+        1 hour. Recordings are removed after -record-retention or when the
+        directory exceeds -record-quota, oldest first.
+      parameters:
+        - {$ref: '#/components/parameters/RequestID'}
+        - {$ref: '#/components/parameters/TimeoutMS'}
+        - {$ref: '#/components/parameters/SessionID'}
+      responses:
+        '200':
+          description: MP4 video.
+          headers:
+            X-Result-Size: {$ref: '#/components/headers/ResultSize'}
+            X-Result-Sha256: {$ref: '#/components/headers/ResultSha256'}
+          content:
+            video/mp4:
+              schema: {type: string, format: binary}
+        default: {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: recordDelete
+      tags: [record]
+      summary: Delete a finished recording
+      parameters:
+        - {$ref: '#/components/parameters/RequestID'}
+        - {$ref: '#/components/parameters/TimeoutMS'}
+        - {$ref: '#/components/parameters/SessionID'}
+      responses:
+        '200': {$ref: '#/components/responses/Empty'}
+        default: {$ref: '#/components/responses/Error'}
+
 components:
   parameters:
     RequestID:
@@ -931,6 +1039,11 @@ components:
       description: Request timeout in milliseconds, truncated to 10 minutes (1 hour for transfers).
       schema: {type: integer, format: int64, minimum: 1}
 
+    SessionID:
+      name: session_id
+      in: path
+      required: true
+      schema: {type: string}
     JobID:
       name: job_id
       in: path
@@ -1564,3 +1677,51 @@ components:
       properties:
         text: {type: string}
         image: {type: string, format: byte, description: PNG.}
+    RecordStartRequest:
+      type: object
+      properties:
+        fps: {type: integer, minimum: 1, maximum: 60, default: 10}
+        display: {type: integer, default: 0}
+        region: {$ref: '#/components/schemas/Rect'}
+        preset: {type: string, enum: [ultrafast, superfast, veryfast, faster, fast, medium, slow, slower, veryslow], default: ultrafast}
+        crf: {type: integer, minimum: 0, maximum: 51, default: 28}
+    RecordStartResult:
+      type: object
+      required: [session_id, started_at]
+      properties:
+        session_id: {type: string}
+        started_at: {type: string, format: date-time}
+    RecordStopRequest:
+      type: object
+      required: [session_id]
+      properties:
+        session_id: {type: string}
+    RecordStopResult:
+      type: object
+      required: [session_id, size, duration_ms, sha256]
+      properties:
+        session_id: {type: string}
+        size: {type: integer, format: int64}
+        duration_ms: {type: integer, format: int64}
+        sha256: {type: string}
+    RecordSession:
+      type: object
+      required: [session_id, status, started_at, finished_at, duration_ms, size, fps, rect]
+      properties:
+        session_id: {type: string}
+        status: {type: string, enum: [recording, finished, failed], description: failed means ffmpeg or vm-agent stopped before record/stop; the file written so far is kept.}
+        started_at: {type: string, format: date-time}
+        finished_at: {type: string, format: date-time, nullable: true}
+        duration_ms: {type: integer, format: int64}
+        size: {type: integer, format: int64}
+        sha256: {type: string}
+        fps: {type: integer}
+        rect: {$ref: '#/components/schemas/Rect'}
+        error: {type: string}
+    RecordListResult:
+      type: object
+      required: [sessions]
+      properties:
+        sessions:
+          type: array
+          items: {$ref: '#/components/schemas/RecordSession'}

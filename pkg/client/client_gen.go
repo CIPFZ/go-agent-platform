@@ -591,6 +591,58 @@ type ClipboardWriteRequest struct {
 	Image []byte `json:"image,omitempty"`
 }
 
+// RecordStartRequest is the RecordStartRequest schema.
+type RecordStartRequest struct {
+	// Default 10.
+	Fps *int `json:"fps,omitempty"`
+	// Default 0.
+	Display *int  `json:"display,omitempty"`
+	Region  *Rect `json:"region,omitempty"`
+	// One of: ultrafast, superfast, veryfast, faster, fast, medium, slow, slower, veryslow. Default ultrafast.
+	Preset *string `json:"preset,omitempty"`
+	// Default 28.
+	Crf *int `json:"crf,omitempty"`
+}
+
+// RecordStartResult is the RecordStartResult schema.
+type RecordStartResult struct {
+	SessionID string    `json:"session_id"`
+	StartedAt time.Time `json:"started_at"`
+}
+
+// RecordStopRequest is the RecordStopRequest schema.
+type RecordStopRequest struct {
+	SessionID string `json:"session_id"`
+}
+
+// RecordStopResult is the RecordStopResult schema.
+type RecordStopResult struct {
+	SessionID  string `json:"session_id"`
+	Size       int64  `json:"size"`
+	DurationMS int64  `json:"duration_ms"`
+	SHA256     string `json:"sha256"`
+}
+
+// RecordSession is the RecordSession schema.
+type RecordSession struct {
+	SessionID string `json:"session_id"`
+	// failed means ffmpeg or vm-agent stopped before record/stop; the file written so far is kept. One of: recording, finished, failed.
+	Status     string     `json:"status"`
+	StartedAt  time.Time  `json:"started_at"`
+	FinishedAt *time.Time `json:"finished_at"`
+	DurationMS int64      `json:"duration_ms"`
+	Size       int64      `json:"size"`
+	SHA256     *string    `json:"sha256,omitempty"`
+	Fps        int        `json:"fps"`
+	Rect       Rect       `json:"rect"`
+	Error      *string    `json:"error,omitempty"`
+}
+
+// RecordListResult is the RecordListResult schema.
+type RecordListResult struct {
+	Sessions []RecordSession `json:"sessions"`
+}
+
 // Operation identifies one API endpoint.
 type Operation struct {
 	ID     string
@@ -646,6 +698,11 @@ var Operations = []Operation{
 	{ID: "fileUpload", Method: "POST", Path: "/v1/file/upload"},
 	{ID: "clipboardRead", Method: "GET", Path: "/v1/clipboard"},
 	{ID: "clipboardWrite", Method: "POST", Path: "/v1/clipboard"},
+	{ID: "recordStart", Method: "POST", Path: "/v1/record/start"},
+	{ID: "recordStop", Method: "POST", Path: "/v1/record/stop"},
+	{ID: "recordList", Method: "GET", Path: "/v1/record/list"},
+	{ID: "recordDownload", Method: "GET", Path: "/v1/record/{session_id}"},
+	{ID: "recordDelete", Method: "DELETE", Path: "/v1/record/{session_id}"},
 }
 
 // Probe calls GET /v1/probe: Service and desktop session health.
@@ -1131,6 +1188,59 @@ func (c *Client) ClipboardRead(ctx context.Context, opts ...Option) (*ClipboardR
 // On Windows an image is placed both as the registered PNG format and as CF_DIB.
 func (c *Client) ClipboardWrite(ctx context.Context, body *ClipboardWriteRequest, opts ...Option) error {
 	return c.do(ctx, "POST", "/v1/clipboard", nil, body, nil, opts)
+}
+
+// RecordStart calls POST /v1/record/start: Start recording the screen with ffmpeg.
+//
+// One recording at a time; a second start is a conflict. The area is
+// chosen like screen/capture (display 0 by default, -1 the virtual
+// desktop, region clipped) and rounded down to even dimensions.
+// ffmpeg runs with libx264, yuv420p and -movflags
+// +frag_keyframe+empty_moov, so the file stays playable even if ffmpeg
+// is killed. unsupported when no usable ffmpeg was found. Default
+// timeout 10 s.
+func (c *Client) RecordStart(ctx context.Context, body *RecordStartRequest, opts ...Option) (*RecordStartResult, error) {
+	var out RecordStartResult
+	if err := c.do(ctx, "POST", "/v1/record/start", nil, body, &out, opts); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// RecordStop calls POST /v1/record/stop: Stop a recording.
+//
+// Sends q to ffmpeg and waits up to 5 s for it to finish the file, then
+// kills it. Stopping a finished session returns its result again.
+func (c *Client) RecordStop(ctx context.Context, body *RecordStopRequest, opts ...Option) (*RecordStopResult, error) {
+	var out RecordStopResult
+	if err := c.do(ctx, "POST", "/v1/record/stop", nil, body, &out, opts); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// RecordList calls GET /v1/record/list: Recording sessions, newest first.
+func (c *Client) RecordList(ctx context.Context, opts ...Option) (*RecordListResult, error) {
+	var out RecordListResult
+	if err := c.do(ctx, "GET", "/v1/record/list", nil, nil, &out, opts); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// RecordDownload calls GET /v1/record/{session_id}: Download a finished recording.
+//
+// Streams the MP4 with X-Result-Size and X-Result-Sha256. A session
+// still recording is a conflict. Default timeout 10 minutes, at most
+// 1 hour. Recordings are removed after -record-retention or when the
+// directory exceeds -record-quota, oldest first.
+func (c *Client) RecordDownload(ctx context.Context, sessionID string, opts ...Option) (*StreamResponse, error) {
+	return c.doStream(ctx, "GET", strings.ReplaceAll("/v1/record/{session_id}", "{session_id}", url.PathEscape(sessionID)), nil, nil, opts)
+}
+
+// RecordDelete calls DELETE /v1/record/{session_id}: Delete a finished recording.
+func (c *Client) RecordDelete(ctx context.Context, sessionID string, opts ...Option) error {
+	return c.do(ctx, "DELETE", strings.ReplaceAll("/v1/record/{session_id}", "{session_id}", url.PathEscape(sessionID)), nil, nil, nil, opts)
 }
 
 // ExecResponse holds whichever of ExecResult or ExecDetachedResult the response carries.

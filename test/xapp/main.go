@@ -13,6 +13,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/jezek/xgb"
 	"github.com/jezek/xgb/xproto"
@@ -39,6 +40,7 @@ func main() {
 	ready := flag.String("ready", "", "file created once the window is mapped")
 	winType := flag.String("type", "", "_NET_WM_WINDOW_TYPE suffix, e.g. DESKTOP, DOCK, UTILITY")
 	fakePID := flag.Int("pid", 0, "advertise this _NET_WM_PID instead of our own")
+	animate := flag.Bool("animate", false, "move a block across the window continuously (changing content for recordings)")
 	pattern := flag.Bool("pattern", false, "paint desktop-like busy content (gradients and text-like noise) instead of a solid colour")
 	flag.Parse()
 
@@ -101,6 +103,9 @@ func main() {
 		out.Write(append(data, '\n'))
 	}
 
+	if *animate {
+		go animateBlock(wid, *w, *h)
+	}
 	km := loadKeymap(c, setup)
 	for {
 		ev, xerr := c.WaitForEvent()
@@ -199,4 +204,23 @@ func paint(c *xgb.Conn, wid xproto.Window, w, h int) {
 		}
 	}
 	xproto.GetInputFocus(c).Reply() // flush
+}
+
+// animateBlock redraws a moving block about 30 times a second over a
+// gradient background on its own connection.
+func animateBlock(wid xproto.Window, w, h int) {
+	c, err := xgb.NewConn()
+	if err != nil {
+		return
+	}
+	gc, _ := xproto.NewGcontextId(c)
+	xproto.CreateGC(c, gc, xproto.Drawable(wid), 0, nil)
+	for frame := 0; ; frame++ {
+		x := (frame * 12) % max(w-120, 1)
+		y := (frame * 7) % max(h-120, 1)
+		xproto.ChangeGC(c, gc, xproto.GcForeground, []uint32{uint32(frame*2654435761) & 0xffffff})
+		xproto.PolyFillRectangle(c, xproto.Drawable(wid), gc, []xproto.Rectangle{{X: int16(x), Y: int16(y), Width: 120, Height: 120}})
+		xproto.GetInputFocus(c).Reply()
+		time.Sleep(33 * time.Millisecond)
+	}
 }
