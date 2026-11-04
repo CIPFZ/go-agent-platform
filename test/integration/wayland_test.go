@@ -116,7 +116,9 @@ func TestWaylandScreenAndInput(t *testing.T) {
 
 	logPath := filepath.Join(t.TempDir(), "wev.log")
 	logFile, _ := os.Create(logPath)
-	wev := exec.Command("wev")
+	// wev writes through stdio; line buffering makes every event reach the
+	// log as it happens rather than when a 4 KiB buffer fills.
+	wev := exec.Command("stdbuf", "-oL", "wev")
 	wev.Stdout, wev.Stderr = logFile, logFile
 	if err := wev.Start(); err != nil {
 		t.Fatal(err)

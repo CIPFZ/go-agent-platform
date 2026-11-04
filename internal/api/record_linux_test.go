@@ -105,9 +105,9 @@ func TestShutdownFinishesRecording(t *testing.T) {
 	e.call("POST", "/v1/record/start", `{}`).code(t, protocol.CodeNoDisplay)
 }
 
-// TestRecordUploadToMinIO runs when VM_AGENT_S3_ENDPOINT points at an
-// S3-compatible server (MinIO in CI).
-func TestRecordUploadToMinIO(t *testing.T) {
+// TestRecordUploadToObjectStorage runs when VM_AGENT_S3_ENDPOINT points at
+// an S3-compatible server (VersityGW in CI, MinIO works the same).
+func TestRecordUploadToObjectStorage(t *testing.T) {
 	endpoint := os.Getenv("VM_AGENT_S3_ENDPOINT")
 	if endpoint == "" {
 		t.Skip("set VM_AGENT_S3_ENDPOINT, VM_AGENT_S3_ACCESS_KEY and VM_AGENT_S3_SECRET_KEY")

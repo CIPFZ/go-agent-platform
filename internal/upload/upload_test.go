@@ -61,7 +61,8 @@ func TestObjectKeys(t *testing.T) {
 }
 
 // Against a real S3-compatible server when VM_AGENT_S3_ENDPOINT,
-// VM_AGENT_S3_ACCESS_KEY and VM_AGENT_S3_SECRET_KEY are set (MinIO in CI).
+// VM_AGENT_S3_ACCESS_KEY and VM_AGENT_S3_SECRET_KEY are set (VersityGW in
+// CI; MinIO was verified as well).
 func TestPutToRealServer(t *testing.T) {
 	endpoint := os.Getenv("VM_AGENT_S3_ENDPOINT")
 	if endpoint == "" {

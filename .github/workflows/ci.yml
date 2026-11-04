@@ -39,17 +39,20 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: Start MinIO
+      - name: Start an S3-compatible server (VersityGW)
         run: |
-          if ! docker run -d --name minio -p 127.0.0.1:9000:9000 \
-            -e MINIO_ROOT_USER=vmagent -e MINIO_ROOT_PASSWORD=vmagent-secret-123 \
-            minio/minio:RELEASE.2025-09-07T16-13-09Z server /data >/tmp/minio.out 2>&1; then
-            deploy/ci/annotate.sh "MinIO did not start" /tmp/minio.out
-            cat /tmp/minio.out
+          # minio/minio is no longer published on Docker Hub; VersityGW is a
+          # Go S3 gateway serving a posix directory.
+          if ! docker run -d --name s3 -p 127.0.0.1:9000:7070 \
+            -e ROOT_ACCESS_KEY=vmagent -e ROOT_SECRET_KEY=vmagent-secret-123 \
+            --entrypoint sh versity/versitygw:v1.10.0 -c 'mkdir -p /tmp/s3 && exec versitygw posix /tmp/s3' \
+            >/tmp/s3.out 2>&1; then
+            deploy/ci/annotate.sh "S3 server did not start" /tmp/s3.out
+            cat /tmp/s3.out
             exit 1
           fi
-          for i in $(seq 1 60); do curl -fsS http://127.0.0.1:9000/minio/health/ready && break; sleep 1; done
-      - name: Uploader against MinIO
+          for i in $(seq 1 60); do curl -s -o /dev/null http://127.0.0.1:9000/ && break; sleep 1; done
+      - name: Uploader against the S3 server
         env:
           VM_AGENT_S3_ENDPOINT: 127.0.0.1:9000
           VM_AGENT_S3_ACCESS_KEY: vmagent
