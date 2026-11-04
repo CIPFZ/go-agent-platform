@@ -164,7 +164,8 @@ func TestGeneratedClientAgainstServer(t *testing.T) {
 	if !errors.As(err, &apiErr) || apiErr.Code != string(protocol.CodeNotFound) {
 		t.Fatalf("missing program = %v", err)
 	}
-	job, err := c.Exec(ctx, &client.ExecRequest{Argv: []string{"go", "version"}, Detach: client.Ptr(true)})
+	// The test binary itself runs anywhere: with no tests selected it prints PASS.
+	job, err := c.Exec(ctx, &client.ExecRequest{Argv: []string{os.Args[0], "-test.run=^$"}, Detach: client.Ptr(true)})
 	if err != nil || job.JobID == nil || job.ExitCode != nil {
 		t.Fatalf("detached = %+v %v", job, err)
 	}
@@ -174,7 +175,7 @@ func TestGeneratedClientAgainstServer(t *testing.T) {
 			t.Fatal(err)
 		}
 		if j.Status != "running" {
-			if j.Status != "exited" || !strings.Contains(j.Stdout, "go version") {
+			if j.Status != "exited" || !strings.Contains(j.Stdout, "PASS") {
 				t.Fatalf("job = %+v", j)
 			}
 			break
