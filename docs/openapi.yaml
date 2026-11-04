@@ -380,6 +380,50 @@ paths:
         '200': {$ref: '#/components/responses/Window'}
         default: {$ref: '#/components/responses/Error'}
 
+  /v1/window/resize:
+    post:
+      operationId: windowResize
+      tags: [window]
+      summary: Move and resize a window, or change its show state
+      description: |
+        Give id and exactly one of rect (the whole window in physical pixels)
+        or state. A maximized or minimized window is restored before rect is
+        applied. Returns the window after the change.
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/WindowResizeRequest'}}}
+      responses:
+        '200': {$ref: '#/components/responses/Window'}
+        default: {$ref: '#/components/responses/Error'}
+
+  /v1/window/close_all:
+    post:
+      operationId: windowCloseAll
+      tags: [window]
+      summary: Ask every user window to close
+      description: |
+        Never touches desktop shell windows (Progman, WorkerW, Shell_TrayWnd,
+        Windows.UI.Core.CoreWindow and similar; _NET_WM_WINDOW_TYPE_DESKTOP
+        and DOCK), vm-agent's own windows, invisible windows or tool windows.
+        After sending the close requests it waits up to wait_ms, within the
+        5 s default request timeout, and reports which windows disappeared.
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/CloseAllRequest'}}}
+      responses:
+        '200':
+          description: Outcome.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties: {result: {$ref: '#/components/schemas/CloseAllResult'}}
+        default: {$ref: '#/components/responses/Error'}
+
   /v1/exec:
     post:
       operationId: exec
@@ -1418,3 +1462,31 @@ components:
         started_at: {type: string, format: date-time}
         finished_at: {type: string, format: date-time, nullable: true}
         reason: {type: string, enum: [cancelled, job_timeout, agent_shutdown, agent_restart]}
+    WindowResizeRequest:
+      type: object
+      required: [id]
+      properties:
+        id: {type: string}
+        rect: {$ref: '#/components/schemas/Rect'}
+        state: {type: string, enum: [maximize, minimize, restore]}
+    CloseAllRequest:
+      type: object
+      properties:
+        exclude_titles:
+          type: array
+          items: {type: string}
+          description: Skip windows whose title contains any of these strings.
+        exclude_pids:
+          type: array
+          items: {type: integer}
+        wait_ms: {type: integer, minimum: 0, default: 3000}
+    CloseAllResult:
+      type: object
+      required: [closed, remaining]
+      properties:
+        closed:
+          type: array
+          items: {$ref: '#/components/schemas/Window'}
+        remaining:
+          type: array
+          items: {$ref: '#/components/schemas/Window'}

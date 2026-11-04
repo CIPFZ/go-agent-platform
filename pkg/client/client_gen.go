@@ -552,6 +552,29 @@ type JobResult struct {
 	Reason *string `json:"reason,omitempty"`
 }
 
+// WindowResizeRequest is the WindowResizeRequest schema.
+type WindowResizeRequest struct {
+	ID   string `json:"id"`
+	Rect *Rect  `json:"rect,omitempty"`
+	// One of: maximize, minimize, restore.
+	State *string `json:"state,omitempty"`
+}
+
+// CloseAllRequest is the CloseAllRequest schema.
+type CloseAllRequest struct {
+	// Skip windows whose title contains any of these strings.
+	ExcludeTitles []string `json:"exclude_titles,omitempty"`
+	ExcludePids   []int    `json:"exclude_pids,omitempty"`
+	// Default 3000.
+	WaitMS *int `json:"wait_ms,omitempty"`
+}
+
+// CloseAllResult is the CloseAllResult schema.
+type CloseAllResult struct {
+	Closed    []Window `json:"closed"`
+	Remaining []Window `json:"remaining"`
+}
+
 // Operation identifies one API endpoint.
 type Operation struct {
 	ID     string
@@ -582,6 +605,8 @@ var Operations = []Operation{
 	{ID: "windowActive", Method: "GET", Path: "/v1/window/active"},
 	{ID: "windowActivate", Method: "POST", Path: "/v1/window/activate"},
 	{ID: "windowClose", Method: "POST", Path: "/v1/window/close"},
+	{ID: "windowResize", Method: "POST", Path: "/v1/window/resize"},
+	{ID: "windowCloseAll", Method: "POST", Path: "/v1/window/close_all"},
 	{ID: "exec", Method: "POST", Path: "/v1/exec"},
 	{ID: "execJobs", Method: "GET", Path: "/v1/exec/jobs"},
 	{ID: "execJob", Method: "GET", Path: "/v1/exec/jobs/{job_id}"},
@@ -783,6 +808,34 @@ func (c *Client) WindowActivate(ctx context.Context, body *WindowSelector, opts 
 func (c *Client) WindowClose(ctx context.Context, body *WindowSelector, opts ...Option) (*Window, error) {
 	var out Window
 	if err := c.do(ctx, "POST", "/v1/window/close", nil, body, &out, opts); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// WindowResize calls POST /v1/window/resize: Move and resize a window, or change its show state.
+//
+// Give id and exactly one of rect (the whole window in physical pixels)
+// or state. A maximized or minimized window is restored before rect is
+// applied. Returns the window after the change.
+func (c *Client) WindowResize(ctx context.Context, body *WindowResizeRequest, opts ...Option) (*Window, error) {
+	var out Window
+	if err := c.do(ctx, "POST", "/v1/window/resize", nil, body, &out, opts); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// WindowCloseAll calls POST /v1/window/close_all: Ask every user window to close.
+//
+// Never touches desktop shell windows (Progman, WorkerW, Shell_TrayWnd,
+// Windows.UI.Core.CoreWindow and similar; _NET_WM_WINDOW_TYPE_DESKTOP
+// and DOCK), vm-agent's own windows, invisible windows or tool windows.
+// After sending the close requests it waits up to wait_ms, within the
+// 5 s default request timeout, and reports which windows disappeared.
+func (c *Client) WindowCloseAll(ctx context.Context, body *CloseAllRequest, opts ...Option) (*CloseAllResult, error) {
+	var out CloseAllResult
+	if err := c.do(ctx, "POST", "/v1/window/close_all", nil, body, &out, opts); err != nil {
 		return nil, err
 	}
 	return &out, nil

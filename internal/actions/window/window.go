@@ -301,3 +301,94 @@ func (s *Service) settle(ctx context.Context, id string, done func(Window) bool)
 		}
 	}
 }
+
+// CloseAllOptions are the close_all parameters (spec 6.4).
+type CloseAllOptions struct {
+	// ExcludeTitles skips windows whose title contains any of these strings.
+	ExcludeTitles []string
+	ExcludePIDs   []int
+	Wait          time.Duration
+	// SelfPIDs are vm-agent's own processes, always excluded.
+	SelfPIDs []int
+}
+
+// CloseAllResult reports which windows disappeared within the wait and
+// which remained, so the caller can decide on process/kill.
+type CloseAllResult struct {
+	Closed    []Window `json:"closed"`
+	Remaining []Window `json:"remaining"`
+}
+
+// closeCandidates applies the built-in exclusions — desktop shell windows,
+// vm-agent's own windows, invisible and tool windows — and the caller's.
+func closeCandidates(windows []Window, o CloseAllOptions) []Window {
+	skipPID := map[int]bool{}
+	for _, p := range append(append([]int(nil), o.ExcludePIDs...), o.SelfPIDs...) {
+		skipPID[p] = true
+	}
+	var out []Window
+	for _, w := range windows {
+		if w.Shell || w.Tool || !w.Visible || skipPID[w.PID] {
+			continue
+		}
+		excluded := false
+		for _, t := range o.ExcludeTitles {
+			if t != "" && strings.Contains(w.Title, t) {
+				excluded = true
+				break
+			}
+		}
+		if !excluded {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// CloseAll sends a close request to every candidate window, then waits up
+// to o.Wait (bounded by ctx, leaving time to answer) for them to disappear.
+func (s *Service) CloseAll(ctx context.Context, o CloseAllOptions) (*CloseAllResult, error) {
+	windows, err := s.List(ctx, true)
+	if err != nil {
+		return nil, err
+	}
+	targets := closeCandidates(windows, o)
+	for _, w := range targets {
+		id := w.ID
+		_, _ = async.Run(ctx, func() (struct{}, error) { return struct{}{}, s.backend.Close(id) })
+	}
+	deadline := time.Now().Add(o.Wait)
+	if d, ok := ctx.Deadline(); ok && d.Add(-250*time.Millisecond).Before(deadline) {
+		deadline = d.Add(-250 * time.Millisecond)
+	}
+	res := &CloseAllResult{Closed: []Window{}, Remaining: targets}
+	for {
+		current, err := s.List(ctx, false)
+		if err != nil {
+			break
+		}
+		alive := map[uint64]bool{}
+		for _, w := range current {
+			if v, err := ParseID(w.ID); err == nil {
+				alive[v] = true
+			}
+		}
+		res.Closed, res.Remaining = []Window{}, []Window{}
+		for _, w := range targets {
+			if v, _ := ParseID(w.ID); alive[v] {
+				res.Remaining = append(res.Remaining, w)
+			} else {
+				res.Closed = append(res.Closed, w)
+			}
+		}
+		if len(res.Remaining) == 0 || !time.Now().Before(deadline) {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return res, nil
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	return res, nil
+}

@@ -199,6 +199,8 @@ type xwinSpec struct {
 	title, class, color string
 	x, y, w, h          int
 	pattern             bool
+	winType             string
+	pid                 int
 }
 
 func startWindow(t *testing.T, s xwinSpec) *xwin {
@@ -216,7 +218,7 @@ func startWindow(t *testing.T, s xwinSpec) *xwin {
 	w := &xwin{events: filepath.Join(dir, "events"), title: s.title, done: make(chan struct{})}
 	ready := filepath.Join(dir, "ready")
 	w.cmd = exec.Command(xappBin, "-title", s.title, "-class", s.class, "-color", s.color, "-events", w.events, "-ready", ready,
-		"-x", fmt.Sprint(s.x), "-y", fmt.Sprint(s.y), "-w", fmt.Sprint(s.w), "-h", fmt.Sprint(s.h), fmt.Sprintf("-pattern=%v", s.pattern))
+		"-x", fmt.Sprint(s.x), "-y", fmt.Sprint(s.y), "-w", fmt.Sprint(s.w), "-h", fmt.Sprint(s.h), fmt.Sprintf("-pattern=%v", s.pattern), "-type", s.winType, "-pid", fmt.Sprint(s.pid))
 	w.cmd.Stderr = os.Stderr
 	if err := w.cmd.Start(); err != nil {
 		t.Fatal(err)

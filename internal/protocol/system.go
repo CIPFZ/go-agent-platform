@@ -146,3 +146,18 @@ type BatchRequest struct {
 type BatchResult struct {
 	Executed int `json:"executed"`
 }
+
+// WindowResizeRequest is the body of POST /v1/window/resize: id plus
+// exactly one of rect or state.
+type WindowResizeRequest struct {
+	ID    string `json:"id"`
+	Rect  *Rect  `json:"rect"`
+	State string `json:"state"`
+}
+
+// CloseAllRequest is the body of POST /v1/window/close_all.
+type CloseAllRequest struct {
+	ExcludeTitles []string `json:"exclude_titles"`
+	ExcludePIDs   []int    `json:"exclude_pids"`
+	WaitMS        *int     `json:"wait_ms"`
+}

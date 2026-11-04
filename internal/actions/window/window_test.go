@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/CIPFZ/go-agent-platform/internal/protocol"
 )
@@ -183,5 +184,74 @@ func TestIDFormat(t *testing.T) {
 	}
 	if _, err := ParseID("zz"); err == nil {
 		t.Error("bad id parsed")
+	}
+}
+
+func TestCloseCandidatesExclusions(t *testing.T) {
+	ws := []Window{
+		{ID: "0x1", Title: "Desktop", PID: 10, Visible: true, Shell: true},
+		{ID: "0x2", Title: "Tool palette", PID: 11, Visible: true, Tool: true},
+		{ID: "0x3", Title: "hidden", PID: 12, Visible: false},
+		{ID: "0x4", Title: "agent window", PID: 99, Visible: true},
+		{ID: "0x5", Title: "Keep me - Editor", PID: 13, Visible: true},
+		{ID: "0x6", Title: "excluded pid", PID: 14, Visible: true},
+		{ID: "0x7", Title: "Close me", PID: 15, Visible: true, Minimized: true},
+	}
+	got := closeCandidates(ws, CloseAllOptions{ExcludeTitles: []string{"Keep me"}, ExcludePIDs: []int{14}, SelfPIDs: []int{99}})
+	if len(got) != 1 || got[0].ID != "0x7" {
+		t.Fatalf("candidates = %+v", got)
+	}
+}
+
+type closingWM struct {
+	fakeWM
+	stubborn map[string]bool
+}
+
+func (c *closingWM) Close(id string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.closed = append(c.closed, id)
+	if c.stubborn[id] {
+		return nil
+	}
+	for i, w := range c.windows {
+		if w.ID == id {
+			c.windows = append(c.windows[:i], c.windows[i+1:]...)
+			break
+		}
+	}
+	return nil
+}
+
+func TestCloseAllReportsClosedAndRemaining(t *testing.T) {
+	wm := &closingWM{fakeWM: fakeWM{windows: []Window{
+		{ID: "0x1", Title: "a", PID: 1, Visible: true},
+		{ID: "0x2", Title: "b", PID: 2, Visible: true},
+		{ID: "0x3", Title: "shell", PID: 3, Visible: true, Shell: true},
+	}}, stubborn: map[string]bool{"0x2": true}}
+	s := NewService(wm)
+	start := time.Now()
+	res, err := s.CloseAll(context.Background(), CloseAllOptions{Wait: 300 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Closed) != 1 || res.Closed[0].ID != "0x1" || len(res.Remaining) != 1 || res.Remaining[0].ID != "0x2" {
+		t.Fatalf("result = %+v", res)
+	}
+	if took := time.Since(start); took < 300*time.Millisecond || took > 2*time.Second {
+		t.Fatalf("waited %s", took)
+	}
+	for _, id := range wm.closed {
+		if id == "0x3" {
+			t.Fatal("shell window was asked to close")
+		}
+	}
+	// The wait is cut short so the answer arrives before the deadline.
+	ctx, cancel := context.WithTimeout(context.Background(), 600*time.Millisecond)
+	defer cancel()
+	start = time.Now()
+	if _, err := s.CloseAll(ctx, CloseAllOptions{Wait: 10 * time.Second}); err != nil || time.Since(start) > 600*time.Millisecond {
+		t.Fatalf("bounded wait: %v after %s", err, time.Since(start))
 	}
 }

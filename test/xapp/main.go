@@ -37,6 +37,8 @@ func main() {
 	color := flag.String("color", "3366cc", "background RRGGBB")
 	events := flag.String("events", "", "JSON lines event log")
 	ready := flag.String("ready", "", "file created once the window is mapped")
+	winType := flag.String("type", "", "_NET_WM_WINDOW_TYPE suffix, e.g. DESKTOP, DOCK, UTILITY")
+	fakePID := flag.Int("pid", 0, "advertise this _NET_WM_PID instead of our own")
 	pattern := flag.Bool("pattern", false, "paint desktop-like busy content (gradients and text-like noise) instead of a solid colour")
 	flag.Parse()
 
@@ -67,7 +69,16 @@ func main() {
 	setString(atom("_NET_WM_NAME"), atom("UTF8_STRING"), *title)
 	setString(xproto.AtomWmClass, xproto.AtomString, "xapp\x00"+*class+"\x00")
 	pid := make([]byte, 4)
-	xgb.Put32(pid, uint32(os.Getpid()))
+	advertised := os.Getpid()
+	if *fakePID != 0 {
+		advertised = *fakePID
+	}
+	xgb.Put32(pid, uint32(advertised))
+	if *winType != "" {
+		t := make([]byte, 4)
+		xgb.Put32(t, uint32(atom("_NET_WM_WINDOW_TYPE_"+*winType)))
+		xproto.ChangeProperty(c, xproto.PropModeReplace, wid, atom("_NET_WM_WINDOW_TYPE"), xproto.AtomAtom, 32, 1, t)
+	}
 	xproto.ChangeProperty(c, xproto.PropModeReplace, wid, atom("_NET_WM_PID"), xproto.AtomCardinal, 32, 1, pid)
 	wmDelete := atom("WM_DELETE_WINDOW")
 	protos := make([]byte, 4)
