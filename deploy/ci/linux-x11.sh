@@ -16,8 +16,9 @@ DISPLAY_NUM=${DISPLAY_NUM:-99}
 SCREEN=${SCREEN:-1920x1080x24}
 WORK=$(mktemp -d)
 pids=()
+. deploy/ci/stop.sh
 cleanup() {
-	for p in "${pids[@]}"; do kill "$p" 2>/dev/null || true; done
+	stop_pids "${pids[@]}"
 	rm -rf "$WORK"
 }
 trap cleanup EXIT

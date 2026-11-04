@@ -23,7 +23,11 @@ exec > >(tee "$stage_log") 2>&1
 trap 'deploy/ci/annotate.sh "Wayland stage failed" "$stage_log"' ERR
 work=$(mktemp -d)
 pids=()
-cleanup() { for p in "${pids[@]}"; do kill "$p" 2>/dev/null || true; done; rm -rf "$work"; }
+. deploy/ci/stop.sh
+cleanup() {
+	stop_pids "${pids[@]}"
+	rm -rf "$work"
+}
 trap cleanup EXIT
 
 if ! pgrep -x systemd-udevd >/dev/null; then
