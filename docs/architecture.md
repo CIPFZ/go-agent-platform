@@ -77,7 +77,7 @@ Wayland 会话（`WAYLAND_DISPLAY` 已设置且 `XDG_SESSION_TYPE=wayland` 或�
 
 - 启动：声明 Per-Monitor V2 DPI 感知（Windows）→ 打开审计 → 回收上次崩溃遗留的命令树（Linux）→ 载入 job 目录（仍为 `running` 的标记为 `killed/agent_restart`）与录像目录 → 探测 ffmpeg → 检查磁盘下限 → 监听。
 - 后台维护：每分钟按保留期与上限清理 job 与录像。
-- 关闭（spec 4.4）：停止接受新请求并等待在途请求最多 10 秒 → 停止进行中的录屏（向 ffmpeg 写 `q`，最多 5 秒）→ 终止后台 job（`killed/agent_shutdown`）→ 释放进程树 → 写关闭审计。`process/launch` 启动的程序不受影响。
+- 关闭（spec 4.4）：停止接受新请求并等待在途请求最多 10 秒 → 取消仍未完成的请求（`timeout/agent_shutdown`），最多再等 2 秒让其写出响应与审计 → 停止进行中的录屏（向 ffmpeg 写 `q`，最多 5 秒）→ 终止后台 job（`killed/agent_shutdown`）→ 释放进程树 → 写关闭审计。`process/launch` 启动的程序不受影响。
 
 ## 状态与文件
 

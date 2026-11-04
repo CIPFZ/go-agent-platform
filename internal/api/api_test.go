@@ -45,6 +45,7 @@ type testEnv struct {
 	t     *testing.T
 	api   *API
 	http  *httptest.Server
+	srv   *server.Server
 	audit *audit.MemorySink
 	mu    sync.Mutex
 	state session.State
@@ -85,6 +86,7 @@ func newEnv(t *testing.T, mutate ...func(*Deps)) *testEnv {
 	e.api = a
 	srv := server.New(server.Options{Audit: e.audit, Dedup: dedup.New(time.Minute, 0, nil), MaxConcurrency: 32}, a.Routes())
 	a.SetStats(srv.Stats())
+	e.srv = srv
 	e.http = httptest.NewServer(srv.Handler())
 	t.Cleanup(func() { e.http.Close(); a.Shutdown() })
 	return e

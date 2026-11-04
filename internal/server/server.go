@@ -53,6 +53,10 @@ type Server struct {
 	limiter chan struct{}
 	handler http.Handler
 	stats   *Stats
+	// base is cancelled with ErrAgentShutdown when the requests still running
+	// after the shutdown grace period are aborted (spec 4.4).
+	base  context.Context
+	abort context.CancelCauseFunc
 }
 
 // Class is the retry class of an action (spec section 5.6).
@@ -98,6 +102,7 @@ func New(opts Options, routes []*Route) *Server {
 		opts.Now = time.Now
 	}
 	s := &Server{opts: opts, mux: http.NewServeMux(), limiter: make(chan struct{}, opts.MaxConcurrency), stats: newStats()}
+	s.base, s.abort = context.WithCancelCause(context.Background())
 	for _, rt := range routes {
 		s.routes = append(s.routes, rt)
 		s.mux.Handle(rt.Method+" "+rt.Path, s.serveRoute(rt))

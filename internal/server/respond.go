@@ -57,6 +57,9 @@ func (s *Server) serveRoute(rt *Route) http.Handler {
 		var status int
 		if err != nil {
 			perr := toError(err, rt)
+			if errors.Is(context.Cause(r.Context()), ErrAgentShutdown) {
+				perr = shutdownError(perr)
+			}
 			i.code = string(perr.Code)
 			body, status = s.encode(protocol.Response{OK: false, RequestID: i.requestID, Error: perr}), perr.Code.HTTPStatus()
 		} else {
@@ -156,6 +159,19 @@ func toError(err error, rt *Route) *protocol.Error {
 		return protocol.Errorf(protocol.CodeTooLarge, "request body exceeds %d bytes", tooLarge.Limit)
 	}
 	return IOError(err)
+}
+
+// shutdownError reports a request aborted by the shutdown of spec 4.4 as a
+// retryable timeout with details.reason=agent_shutdown. A timeout keeps its
+// details (input/batch's executed count); other errors are the action's own
+// outcome and stand.
+func shutdownError(perr *protocol.Error) *protocol.Error {
+	if perr.Code != protocol.CodeTimeout {
+		return perr
+	}
+	perr.Message = "vm-agent shut down before the action finished"
+	perr.Retryable = true
+	return perr.WithReason(protocol.ReasonAgentShutdown)
 }
 
 // IOError classifies a filesystem or subprocess error (spec 5.5).

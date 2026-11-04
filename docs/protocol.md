@@ -51,6 +51,7 @@
 - 首次请求已完成：HTTP 200 原样回放首次响应（包括首次的错误），附 `X-Dedup-Hit: true`。
 - 首次响应是流式：`409 conflict`，`details.reason=dedup_stream`。
 - 调用方在执行中断开：结果记为 `timeout`、`details.reason=client_disconnected`，同 id 重试得到该回放，不会重复执行。`input/batch` 整体使用一个 id。
+- 服务关闭时 10 秒宽限期后仍在执行的请求被取消，返回 `timeout`、`retryable=true`、`details.reason=agent_shutdown`（spec 4.4）。去重缓存只在内存中，服务重启后同 id 重试会重新执行。
 
 ## 并发
 

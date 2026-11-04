@@ -163,6 +163,8 @@ Windows 进程启动后首先调用 `SetProcessDpiAwarenessContext(DPI_AWARENESS
 5. 关闭 Job Object 句柄，清理残留子进程。
 6. 写入关闭审计记录后退出。
 
+宽限期结束后的处理：第 2 步的 10 秒结束时仍未完成的请求，其上下文被取消，动作随之中止（同步 `exec` 终止进程树，输入在动作之间停止），处理器返回 `timeout`，`retryable` 为 true，`details.reason=agent_shutdown`（`input/batch` 仍附 `executed` 等字段）。服务再最多等待 2 秒，让这些请求写出响应与各自的审计记录，然后才进入第 3 步；2 秒内仍未返回的请求不再等待，随进程退出断开，其数量写入服务日志。因此第 6 步的关闭审计记录总是在被中止请求的审计记录之后。
+
 `process/launch` 启动的程序不受影响。
 
 ## 5. 协议

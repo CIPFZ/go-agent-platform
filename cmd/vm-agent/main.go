@@ -12,7 +12,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
-	"time"
 
 	"github.com/CIPFZ/go-agent-platform/internal/actions/a11y"
 	"github.com/CIPFZ/go-agent-platform/internal/actions/file"
@@ -24,9 +23,6 @@ import (
 	"github.com/CIPFZ/go-agent-platform/internal/server"
 	"github.com/CIPFZ/go-agent-platform/internal/version"
 )
-
-// shutdownGrace bounds waiting for in-flight requests (spec 4.4 step 2).
-const shutdownGrace = 10 * time.Second
 
 func main() {
 	// The Linux accessibility helper is vm-agent re-executed with a request
@@ -108,12 +104,13 @@ func run(cfg *config.Config) error {
 	case <-ctx.Done():
 	}
 
-	// Spec 4.4: stop accepting, wait for in-flight requests up to 10 s, then
-	// let the actions finish recordings, kill jobs and release Job handles.
+	// Spec 4.4: stop accepting, wait for in-flight requests up to 10 s and
+	// abort the rest, then let the actions finish recordings, kill jobs and
+	// release Job handles.
 	log.Printf("vm-agent shutting down")
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
-	_ = httpServer.Shutdown(shutdownCtx)
-	cancel()
+	if aborted, unfinished := server.GracefulStop(httpServer, srv, server.ShutdownGrace, server.AbortWait); aborted > 0 {
+		log.Printf("vm-agent: aborted %d requests still running after %s; %d did not finish within %s", aborted, server.ShutdownGrace, unfinished, server.AbortWait)
+	}
 	agent.Shutdown()
 	sink.Record(audit.Event{Kind: "shutdown", Details: map[string]string{"version": version.Version}})
 	return nil

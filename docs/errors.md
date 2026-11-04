@@ -45,6 +45,7 @@
 | `in_flight` | `conflict` | 不可重试动作 | 相同 `方法 + 路径 + X-Request-Id` 的首次请求仍在执行（spec 5.6） |
 | `dedup_stream` | `conflict` | 不可重试动作 | 首次响应为流式，无法回放（spec 5.6） |
 | `client_disconnected` | `timeout` | 全部 | 调用方在动作完成前断开连接；仅在去重回放中可见，`input/batch` 同时给出 `executed` |
+| `agent_shutdown` | `timeout` | 全部 | 服务关闭时请求在 10 秒宽限期结束后仍未完成，动作被取消（spec 4.4）；`retryable` 恒为 true，`input/batch` 同时给出 `executed`。非幂等动作可能已部分执行，重试前应确认其效果 |
 | `policy_denied` | `invalid_request` | `exec`、`process/launch` | 命中 `-exec-denylist-file`，或配置了 `-exec-allowlist-file` 而未命中 |
 | `url_scheme` | `invalid_request` | `process/open` | `url` 的 scheme 不是 `http`、`https`、`file` |
 | `path_not_absolute` | `invalid_request` | `file/*`、`process/open` | 路径不是绝对路径 |

@@ -60,6 +60,9 @@ func (s *Stats) observe(action, code string, elapsed time.Duration, dedupHit boo
 }
 
 // WritePrometheus renders the counters in the Prometheus text format.
+// InFlight returns the number of requests currently executing.
+func (s *Stats) InFlight() int64 { return s.inFlight.Load() }
+
 func (s *Stats) WritePrometheus(w io.Writer) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

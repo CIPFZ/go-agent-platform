@@ -71,9 +71,15 @@ func (s *Server) observe(next http.Handler) http.Handler {
 			i.requestID = newRequestID()
 		}
 		versionHeader(w)
+		// The counter drops only after the audit record is written, so
+		// GracefulStop can wait for the records of aborted requests.
 		s.stats.inFlight.Add(1)
 		defer s.stats.inFlight.Add(-1)
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), infoKey{}, i)))
+		ctx, cancel := context.WithCancelCause(context.WithValue(r.Context(), infoKey{}, i))
+		defer cancel(nil)
+		stopAbort := context.AfterFunc(s.base, func() { cancel(context.Cause(s.base)) })
+		defer stopAbort()
+		next.ServeHTTP(w, r.WithContext(ctx))
 		elapsed := s.opts.Now().Sub(i.start)
 		_ = http.NewResponseController(w).Flush()
 		if i.code == "" {
