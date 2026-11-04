@@ -91,7 +91,7 @@ func TestNoLiteralReasons(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() && (d.Name() == "legacy" || d.Name() == "tools" || strings.HasPrefix(d.Name(), ".")) && path != root {
+		if d.IsDir() && (d.Name() == "tools" || strings.HasPrefix(d.Name(), ".")) && path != root {
 			return filepath.SkipDir
 		}
 		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
