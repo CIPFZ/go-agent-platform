@@ -23,8 +23,10 @@ func supervise(cfg *config.Config, args []string) int {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	lock := filepath.Join(filepath.Dir(cfg.JobDir), "vm-agent.lock")
-	err = supervisor.Run(ctx, supervisor.Defaults(exe, config.ChildArgs(args), lock))
+	stateDir := filepath.Dir(cfg.JobDir)
+	opts := supervisor.Defaults(exe, config.ChildArgs(args), filepath.Join(stateDir, "vm-agent.lock"))
+	opts.LogPath = filepath.Join(stateDir, "vm-agent.log")
+	err = supervisor.Run(ctx, opts)
 	if errors.Is(err, supervisor.ErrAlreadyRunning) {
 		log.Printf("vm-agent supervisor: %v; exiting", err)
 		return 0

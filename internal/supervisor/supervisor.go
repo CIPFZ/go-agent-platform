@@ -37,8 +37,15 @@ type Options struct {
 	Backoff      time.Duration
 	// StopGrace bounds the wait for the child after forwarding termination.
 	StopGrace time.Duration
-	Logf      func(format string, args ...any)
+	// LogPath receives the child's stdout and stderr and the supervisor's own
+	// messages; empty inherits the supervisor's streams. The Windows build
+	// has no console, so this file is where its diagnostics go.
+	LogPath string
+	Logf    func(format string, args ...any)
 }
+
+// logMax rotates the supervisor log (one backup is kept).
+const logMax = 10 << 20
 
 // Defaults returns the spec 4.1 timings.
 func Defaults(executable string, args []string, lockFile string) Options {
@@ -64,6 +71,18 @@ func Run(ctx context.Context, o Options) error {
 		return err
 	}
 	defer os.Remove(o.LockFile)
+	if o.LogPath != "" {
+		logf := o.Logf
+		o.Logf = func(format string, args ...any) {
+			if f := openLog(o.LogPath); f != nil {
+				fmt.Fprintf(f, "%s supervisor: %s\n", time.Now().UTC().Format(time.RFC3339), fmt.Sprintf(format, args...))
+				f.Close()
+			}
+			if logf != nil {
+				logf(format, args...)
+			}
+		}
+	}
 	quick := 0
 	for {
 		ran, err := runOnce(ctx, o)
@@ -101,6 +120,12 @@ func runOnce(ctx context.Context, o Options) (ran time.Duration, err error) {
 	cmd := exec.Command(o.Executable, o.Args...)
 	cmd.Env = append(os.Environ(), EnvSupervised+"=1")
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	if o.LogPath != "" {
+		if f := openLog(o.LogPath); f != nil {
+			defer f.Close()
+			cmd.Stdout, cmd.Stderr = f, f
+		}
+	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return 0, err
@@ -124,6 +149,19 @@ func runOnce(ctx context.Context, o Options) (ran time.Duration, err error) {
 			return 0, <-exited
 		}
 	}
+}
+
+// openLog opens the log for appending, rotating it first when it is over
+// logMax.
+func openLog(path string) *os.File {
+	if info, err := os.Stat(path); err == nil && info.Size() > logMax {
+		_ = os.Rename(path, path+".1")
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return nil
+	}
+	return f
 }
 
 // acquireLock implements the lock file of spec 4.1: it holds the

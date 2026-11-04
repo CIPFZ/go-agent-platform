@@ -8,7 +8,7 @@
 
 ```bash
 go build ./...
-GOOS=windows GOARCH=amd64 go build -o dist/vm-agent.exe ./cmd/vm-agent
+GOOS=windows GOARCH=amd64 go build -ldflags=-H=windowsgui -o dist/vm-agent.exe ./cmd/vm-agent
 GOOS=linux   GOARCH=amd64 go build -o dist/vm-agent-linux-amd64 ./cmd/vm-agent
 GOOS=linux   GOARCH=arm64 go build -o dist/vm-agent-linux-arm64 ./cmd/vm-agent
 ```

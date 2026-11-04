@@ -75,7 +75,8 @@ jobs:
           version="0.1.0-dev+${GITHUB_SHA::12}"
           ldflags="-s -w -X github.com/CIPFZ/go-agent-platform/internal/version.Version=${version}"
           mkdir -p dist
-          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "$ldflags" -o dist/vm-agent-windows-amd64.exe ./cmd/vm-agent
+          # windowsgui: no console window on the automated desktop.
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "$ldflags -H=windowsgui" -o dist/vm-agent-windows-amd64.exe ./cmd/vm-agent
           GOOS=linux   GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "$ldflags" -o dist/vm-agent-linux-amd64 ./cmd/vm-agent
           GOOS=linux   GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -ldflags "$ldflags" -o dist/vm-agent-linux-arm64 ./cmd/vm-agent
           (cd dist && sha256sum * > SHA256SUMS)

@@ -151,3 +151,25 @@ func TestLockHeldByLiveSupervisorRefusesStart(t *testing.T) {
 		t.Fatalf("stale lock: %v", err)
 	}
 }
+
+func TestChildOutputGoesToLog(t *testing.T) {
+	dir := t.TempDir()
+	o := testOptions(t, dir)
+	o.LogPath = filepath.Join(dir, "vm-agent.log")
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- Run(ctx, o) }()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		data, _ := os.ReadFile(o.LogPath)
+		if strings.Contains(string(data), "supervisor: vm-agent child exited") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("log = %q", data)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	<-done
+}
