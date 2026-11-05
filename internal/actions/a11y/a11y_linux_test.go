@@ -4,6 +4,7 @@ package a11y
 
 import (
 	"context"
+	"math"
 	"os"
 	"os/exec"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/jezek/xgb/xproto"
 
 	"github.com/CIPFZ/go-agent-platform/internal/platform/x11"
+	"github.com/CIPFZ/go-agent-platform/internal/protocol"
 )
 
 func TestStateNames(t *testing.T) {
@@ -23,6 +25,21 @@ func TestStateNames(t *testing.T) {
 	}
 	if got := strings.Join(stateNames(0), ","); got != "offscreen" {
 		t.Fatalf("hidden states = %s", got)
+	}
+}
+
+// GTK reports unmapped widgets at INT_MIN with a placeholder size; those
+// have no on-screen extent (seen on Ubuntu 22.04 GNOME: about half of gedit's
+// and Nautilus's nodes).
+func TestScreenRect(t *testing.T) {
+	req := Request{OriginX: -1280, OriginY: 0}
+	if r := screenRect(100, 50, 30, 20, req); r == nil || *r != (protocol.Rect{X: 1380, Y: 50, W: 30, H: 20}) {
+		t.Fatalf("visible rect = %+v", r)
+	}
+	for _, c := range [][4]int32{{math.MinInt32, math.MinInt32, 1, 1}, {math.MinInt32, math.MinInt32, 167, 34}, {10, math.MinInt32, 5, 5}, {10, 10, 0, 5}, {10, 10, 5, -1}} {
+		if r := screenRect(c[0], c[1], c[2], c[3], req); r != nil {
+			t.Errorf("screenRect%v = %+v, want nil", c, r)
+		}
 	}
 }
 

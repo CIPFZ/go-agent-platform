@@ -5,6 +5,7 @@ package a11y
 import (
 	"context"
 	"fmt"
+	"math"
 	"os/exec"
 	"sort"
 	"time"
@@ -204,8 +205,8 @@ func (w *walker) node(r ref, depth int) *Node {
 	if has[ifaceComponent] {
 		// GetExtents returns one (iiii) struct; coord type 0 is screen.
 		var ext struct{ X, Y, W, H int32 }
-		if w.call(r, ifaceComponent+".GetExtents", uint32(0)).Store(&ext) == nil && ext.W > 0 && ext.H > 0 {
-			n.Rect = &protocol.Rect{X: int(ext.X) - w.req.OriginX, Y: int(ext.Y) - w.req.OriginY, W: int(ext.W), H: int(ext.H)}
+		if w.call(r, ifaceComponent+".GetExtents", uint32(0)).Store(&ext) == nil {
+			n.Rect = screenRect(ext.X, ext.Y, ext.W, ext.H, w.req)
 		}
 	}
 	switch {
@@ -232,6 +233,17 @@ func (w *walker) node(r ref, depth int) *Node {
 		n.Children = append(n.Children, w.node(c, depth+1))
 	}
 	return n
+}
+
+// screenRect converts AT-SPI screen extents to an API rect, or nil when the
+// element has no on-screen extent: an empty size, or the INT_MIN position
+// GTK reports for widgets that are not mapped (hidden pages, closed popovers),
+// which comes with a 1x1 or even a real size.
+func screenRect(x, y, w, h int32, req Request) *protocol.Rect {
+	if w <= 0 || h <= 0 || x == math.MinInt32 || y == math.MinInt32 {
+		return nil
+	}
+	return &protocol.Rect{X: int(x) - req.OriginX, Y: int(y) - req.OriginY, W: int(w), H: int(h)}
 }
 
 func walk(req Request) (*Result, error) {
