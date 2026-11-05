@@ -20,11 +20,12 @@ HTTP 骨架与直通鉴权位、审计、去重、`probe`、`capabilities`、`sc
 
 ## 需要真实环境的验证
 
-以下验收在开发环境中无法执行，需在目标 VM 上运行脚本确认：
+以下验收在开发环境中无法执行，需在目标 VM 上运行脚本确认（已在真实 VM 上完成的部分见 spec 13.1 末尾的验证范围）：
 
-- Windows 10/11：`deploy/windows-e2e.ps1` 在 100%、125%、150% 缩放下的点击误差、截图延迟、锁屏、重启与 Notepad 回归；安装、升级、回滚脚本。以上各项已在 Windows Server 2022（10.0.20348）真实 VM 上通过，10/11 仍待验证。
-- 24 小时稳定性：`test/soak` 在最终构建上的完整运行（Linux 与 Windows 各一次）。
-- 真实桌面环境（GNOME 等）的锁屏检测与剪贴板管理器交互。
-- Windows 10/11 上的 `a11y/tree`（原生 UI Automation 实现已在 Windows Server 2022 上用 Notepad 与 Explorer 验证）。
-- GNOME/KDE Wayland 会话：Screenshot portal 的权限行为，以及 RemoteDesktop 回退路径（只对伪造的 portal 测试过调用序列）。
+- Windows 10/11：`deploy/windows-e2e.ps1` 在 100%、125%、150% 缩放下的点击误差、截图延迟、锁屏、重启与 Notepad 回归；安装、升级、回滚脚本；`a11y/tree`。以上各项已在 Windows Server 2022（10.0.20348）真实 VM 上通过，10/11 仍待验证。
 - Windows 多显示器与混合 DPI。
+- 24 小时稳定性：Linux 已在 Xvfb 上用最终构建跑满（RSS +4.8%，goroutine −6.3%，句柄 −9.1%）；Windows 一次待完成。
+- Ubuntu 24.04 真实桌面（真实 GNOME 只在 Ubuntu 22.04.3 on Xorg 上验证过）。
+- GNOME/KDE Wayland 真实会话：冷启动 probe、Screenshot portal 的弹窗与授权行为、uinput 输入，以及 `VM_AGENT_PORTAL_SETUP=1` 一次性批准后的 RemoteDesktop 回退（只在 sway 与伪造的 portal 上测试过）。
+- Linux 重启后由自动登录拉起 systemd user service（需要能重启 VM 的权限）。
+- `deploy/linux/preconditions.sh --system`（需要 root 的真实 VM）。

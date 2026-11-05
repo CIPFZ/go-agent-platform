@@ -39,7 +39,7 @@
 
 - `exec`、后台 job、ffmpeg 运行在可整体终止的进程树中（Windows Job Object `KILL_ON_JOB_CLOSE`，Linux 进程组），超时、断开、取消与服务退出时整树终止，服务崩溃后下次启动回收。
 - `process/launch` 启动的程序有意脱离服务，服务重启后继续运行。
-- 剪贴板：Linux 上由 `vm-agent` 写入的内容只存在于本进程，退出即消失；需要持久化时由镜像中的剪贴板管理器负责。
+- 剪贴板：Linux 上 `vm-agent` 写入的内容由本进程作为 X selection owner 提供，`vm-agent` 退出后是否保留取决于桌面：没有剪贴板管理器时随之消失；GNOME Shell（mutter）自带剪贴板管理，会在 owner 退出时接管并保留文本与图像（Ubuntu 22.04 GNOME 42 实测），之后读到的仍是这些内容。
 - 录像、job 输出与审计写在桌面用户的目录中，目录权限 0700。
 
 ## 可选能力的安全要点
