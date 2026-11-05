@@ -519,7 +519,7 @@ VM 是隔离单元。`vm-agent` 以桌面用户身份运行，权限等同该用
 
 Windows 验证范围：以上验收及阶段 2、3 的 Windows 项（安装、升级、回滚、`-supervise` 重启、剪贴板、录屏、`a11y/tree`）已在 Windows Server 2022 Datacenter（10.0.20348，单显示器，100%/125%/150% 缩放）的真实 VM 上验证通过，计划任务的登录触发器（重启后自动登录拉起）与每日触发器均实测拉起服务。Windows 10/11 尚未验证，Server 上的结果不代表 10/11 已通过；Windows 多显示器与混合 DPI 同样未验证。
 
-Linux 验证范围：除 CI 的 Ubuntu 24.04 Xvfb 环境外，验收 1、2、4、5、6 及阶段 2、3 的 Linux X11 项（`deploy/e2e.sh`、login1 `LockedHint` 锁屏检测、剪贴板文本与 PNG、录屏、`a11y/tree`、systemd user service 的安装、升级、回滚与在线升级）已在一台真实桌面 VM 上验证通过：Ubuntu 22.04.3 LTS（不是本节指定的 24.04），GNOME 42 on Xorg（gdm3 自动登录），单显示器 1920×1080、缩放 1，经 OSWorld server 远程操作，无 root 权限。未验证：Ubuntu 24.04 真实桌面；GNOME Wayland 会话（该 VM 的 gdm 禁用 Wayland，且无 root 改配置或授予 `/dev/uinput`）及其 Screenshot、RemoteDesktop portal 与 uinput 路径；重启后自动拉起（普通用户无法经 polkit 重启）；`deploy/linux/preconditions.sh --system`（需要 root）。
+Linux 验证范围：除 CI 的 Ubuntu 24.04 Xvfb 环境外，验收 1、2、4、5、6 及阶段 2、3 的 Linux X11 项（`deploy/e2e.sh`、login1 `LockedHint` 锁屏检测、剪贴板文本与 PNG、录屏、`a11y/tree`、systemd user service 的安装、升级、回滚、在线升级与重启后经自动登录拉起）已在一台真实桌面 VM 上验证通过：Ubuntu 22.04.3 LTS（不是本节指定的 24.04），GNOME 42 on Xorg（gdm3 自动登录），单显示器 1920×1080、缩放 1，经 OSWorld server 远程操作，无 root 权限。未验证：Ubuntu 24.04 真实桌面；GNOME Wayland 会话（该 VM 的 gdm 禁用 Wayland，且无 root 改配置或授予 `/dev/uinput`）及其 Screenshot、RemoteDesktop portal 与 uinput 路径；`deploy/linux/preconditions.sh --system`（需要 root）。重启验证由 vm-agent 的 `exec` 执行 `systemctl reboot`：用户 systemd 管理器下的进程归属活动会话，polkit 放行，而会话外的系统服务需要管理员认证。
 
 ### 阶段 2：补齐操作面与交付
 

@@ -27,5 +27,4 @@ HTTP 骨架与直通鉴权位、审计、去重、`probe`、`capabilities`、`sc
 - 24 小时稳定性：Linux 已在 Xvfb 上用最终构建跑满（RSS +4.8%，goroutine −6.3%，句柄 −9.1%）；Windows 一次待完成。
 - Ubuntu 24.04 真实桌面（真实 GNOME 只在 Ubuntu 22.04.3 on Xorg 上验证过）。
 - GNOME/KDE Wayland 真实会话：冷启动 probe、Screenshot portal 的弹窗与授权行为、uinput 输入，以及 `VM_AGENT_PORTAL_SETUP=1` 一次性批准后的 RemoteDesktop 回退（只在 sway 与伪造的 portal 上测试过）。
-- Linux 重启后由自动登录拉起 systemd user service（需要能重启 VM 的权限）。
 - `deploy/linux/preconditions.sh --system`（需要 root 的真实 VM）。
