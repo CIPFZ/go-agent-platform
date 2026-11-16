@@ -22,6 +22,8 @@
   video { display: block; max-width: 100%; max-height: 100%; background: #000; user-select: none; -webkit-user-select: none; }
   body.actual #stage { align-items: flex-start; justify-content: flex-start; }
   body.actual video { max-width: none; max-height: none; }
+  /* Holds the keyboard focus so a local input method can compose; its text is sent as typed text. */
+  #ime { position: fixed; left: 8px; bottom: 8px; width: 2px; height: 20px; padding: 0; border: 0; outline: none; resize: none; opacity: 0; font-size: 16px; pointer-events: none; overflow: hidden; }
   #veil { position: fixed; inset: 36px 0 0 0; display: flex; align-items: center; justify-content: center; background: rgba(11, 13, 16, .86); z-index: 5; text-align: center; padding: 24px; }
   #veil[hidden] { display: none; }
   #card { max-width: 420px; }
@@ -44,7 +46,6 @@
     <option value="AltLeft+F4">Alt+F4</option>
     <option value="MetaLeft+KeyD">Win+D（显示桌面）</option>
     <option value="MetaLeft+KeyE">Win+E（资源管理器）</option>
-    <option value="MetaLeft+KeyL">Win+L（锁屏）</option>
     <option value="PrintScreen">PrintScreen</option>
   </select>
   <select id="quality" title="帧率与码率">
@@ -54,16 +55,20 @@
     <option value="30,4000">30 帧 · 4 Mbps</option>
     <option value="15,2000">15 帧 · 2 Mbps</option>
   </select>
+  <button id="clip" hidden title="远端复制了新的文字；点击后复制到本机剪贴板">复制远端剪贴板</button>
+  <button id="macmap" hidden title="⌘ 键在远端当作 Ctrl 还是 Win 键"></button>
   <button id="fit" title="适应窗口 / 原始大小">原始大小</button>
-  <button id="full" title="全屏；全屏时可捕获 Win、Alt+Tab 等系统键">全屏</button>
+  <button id="full" title="全屏。全屏时可捕获 Win、Alt+Tab、Esc 等系统键（需要先在 chrome://flags 里把本页地址标记为安全来源）">全屏</button>
   <button id="release" title="结束使用，让别人可以使用这台机器">释放</button>
 </div>
-<div id="stage" tabindex="0"><video id="video" autoplay playsinline muted></video></div>
+<div id="stage"><video id="video" autoplay playsinline muted></video><textarea id="ime" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="键盘输入"></textarea></div>
 <div id="veil"><div id="card"></div></div>
 <script>
 'use strict';
 const $ = (id) => document.getElementById(id);
-const video = $('video'), stage = $('stage'), veil = $('veil'), card = $('card'), stateEl = $('state');
+const video = $('video'), stage = $('stage'), veil = $('veil'), card = $('card'), stateEl = $('state'), ime = $('ime');
+const focusInput = () => ime.focus({ preventScroll: true });
+const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 const store = (s, k, v) => { try { if (v === undefined) return s.getItem(k); s.setItem(k, v); } catch (e) { return null; } };
 let clientId = store(sessionStorage, 'vmagent.client');
 if (!clientId) { clientId = Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(16).padStart(2, '0')).join(''); store(sessionStorage, 'vmagent.client', clientId); }
@@ -117,7 +122,7 @@ async function connect() {
   };
   pc.onconnectionstatechange = () => {
     if (me !== pc) return;
-    if (pc.connectionState === 'connected') { hide(); stage.focus(); statsTimer = setInterval(stats, 1000); }
+    if (pc.connectionState === 'connected') { hide(); focusInput(); statsTimer = setInterval(stats, 1000); }
     if (pc.connectionState === 'failed' || pc.connectionState === 'closed') { setState('连接已断开，正在重连…', true); retry(1000); }
     if (pc.connectionState === 'disconnected') setState('网络中断，等待恢复…', true);
   };
@@ -160,6 +165,11 @@ function onControl(m) {
   if (m.t === 'status') { status = m; }
   else if (m.t === 'cursor') { cursorMsg = m; applyCursor(); }
   else if (m.t === 'error') { setState('视频不可用：' + m.message, true); }
+  else if (m.t === 'clip') { if (m.large) fetchClip(); else gotClip(m.text); }
+  else if (m.t === 'desk') {
+    if (m.locked) show('<h1>远端已锁屏</h1><p>锁屏界面目前无法显示和操作，需要在那台电脑上解锁。解锁后画面会自动恢复。</p>');
+    else hide();
+  }
   else if (m.t === 'bye') {
     const why = { idle: '长时间没有操作，使用权已自动释放。', released: '使用权已释放。', agent_shutdown: '远端服务正在重启。', video_failed: '远端无法采集画面。' }[m.reason];
     if (m.reason === 'replaced') return;
@@ -227,7 +237,7 @@ video.addEventListener('pointermove', (e) => {
 });
 video.addEventListener('pointerdown', (e) => {
   const p = remotePoint(e); if (!p || e.button > 2) return;
-  e.preventDefault(); stage.focus(); video.setPointerCapture(e.pointerId);
+  e.preventDefault(); ime.style.left = e.clientX + 'px'; ime.style.top = e.clientY + 'px'; ime.style.bottom = 'auto'; focusInput(); video.setPointerCapture(e.pointerId);
   moveTo = null; sendInput({ t: 'md', b: e.button, x: p.x, y: p.y });
 });
 video.addEventListener('pointerup', (e) => {
@@ -243,35 +253,102 @@ video.addEventListener('wheel', (e) => {
   sendInput({ t: 'mw', dx: e.deltaX * unit, dy: e.deltaY * unit });
 }, { passive: false });
 
+// On a Mac the Command key can act as Ctrl, so Cmd+C, Cmd+V, Cmd+Z and the
+// like do on the remote desktop what the hands expect.
+let macMap = isMac && store(localStorage, 'vmagent.macmap') !== 'off';
+const mapCode = (code) => (macMap && { MetaLeft: 'ControlLeft', MetaRight: 'ControlRight' }[code]) || code;
+const isModifier = (code) => /^(Control|Shift|Alt|Meta)(Left|Right)$/.test(code);
+const isPaste = (e) => e.code === 'KeyV' && !e.altKey && (isMac ? macMap && e.metaKey : e.ctrlKey);
 function keyDown(code) { down.add(code); sendInput({ t: 'kd', c: code }); }
 function keyUp(code) { down.delete(code); sendInput({ t: 'ku', c: code }); }
 function releaseAll() { if (down.size || session) sendInput({ t: 'rel' }); down.clear(); }
 stage.addEventListener('keydown', (e) => {
-  if (!session || !e.code) return;
-  e.preventDefault(); e.stopPropagation(); keyDown(e.code);
+  if (!session) return;
+  if (e.isComposing || e.keyCode === 229) return;   // the local input method is composing with this key
+  if (isPaste(e)) return;                            // becomes a paste event, handled below
+  if (!e.code) return;
+  e.preventDefault(); e.stopPropagation(); keyDown(mapCode(e.code));
 });
 stage.addEventListener('keyup', (e) => {
   if (!session || !e.code) return;
-  e.preventDefault(); e.stopPropagation(); keyUp(e.code);
+  e.preventDefault(); e.stopPropagation();
+  const code = mapCode(e.code);
+  if (down.has(code)) keyUp(code);
+  // macOS does not report the release of other keys while Command is held.
+  if (isMac && /^Meta/.test(e.code)) for (const c of [...down]) if (!isModifier(c)) keyUp(c);
 });
 // A key released while the page is not looking would stay down on the remote side.
 window.addEventListener('blur', releaseAll);
 document.addEventListener('visibilitychange', () => { if (document.hidden) releaseAll(); });
+// Closing the tab by habit (Cmd+W, Ctrl+W) cannot be intercepted; ask first.
+window.addEventListener('beforeunload', (e) => { if (session) { e.preventDefault(); e.returnValue = ''; } });
+
+// --- text from a local input method: whatever it commits is typed on the remote side
+let composing = false;
+function flushIme() {
+  if (composing) return;
+  const text = ime.value; ime.value = '';
+  if (text && session) sendInput({ t: 'tx', s: text });
+}
+ime.addEventListener('compositionstart', () => { composing = true; });
+ime.addEventListener('compositionend', () => { composing = false; setTimeout(flushIme, 0); });
+ime.addEventListener('input', () => { if (!composing) setTimeout(flushIme, 0); });
+
+// --- clipboard
+let lastClip = null, pendingClip = null;
+// Local to remote: pasting here puts the text on the remote clipboard, then pastes there.
+document.addEventListener('paste', async (e) => {
+  if (!session) return;
+  e.preventDefault();
+  const text = (e.clipboardData && e.clipboardData.getData('text/plain')) || '';
+  if (text) {
+    lastClip = text;
+    try { await fetch('/v1/clipboard', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) }); } catch (err) {}
+  }
+  const held = down.has('ControlLeft') || down.has('ControlRight');
+  if (!held) sendInput({ t: 'kd', c: 'ControlLeft' });
+  sendInput({ t: 'kd', c: 'KeyV' }); sendInput({ t: 'ku', c: 'KeyV' });
+  if (!held) sendInput({ t: 'ku', c: 'ControlLeft' });
+});
+// Remote to local: text copied on the remote desktop is copied here.
+async function copyLocal(text) {
+  try { if (window.isSecureContext && navigator.clipboard) { await navigator.clipboard.writeText(text); return true; } } catch (e) {}
+  // Without a secure origin a page may only copy right after a key press or click.
+  const t = document.createElement('textarea'); t.value = text; t.style.cssText = 'position:fixed;left:0;top:0;opacity:0';
+  document.body.appendChild(t); t.select();
+  let ok = false; try { ok = document.execCommand('copy'); } catch (e) {}
+  t.remove(); focusInput();
+  return ok;
+}
+async function gotClip(text) {
+  if (text === lastClip) return;
+  lastClip = pendingClip = text;
+  if (await copyLocal(text)) pendingClip = null;
+  $('clip').hidden = pendingClip === null;
+}
+async function fetchClip() {
+  try { const r = await (await fetch('/v1/clipboard')).json(); if (r.ok && r.result.text) gotClip(r.result.text); } catch (e) {}
+}
+$('clip').onclick = async () => { if (pendingClip !== null && await copyLocal(pendingClip)) { pendingClip = null; $('clip').hidden = true; } };
+
+function showMacMap() { $('macmap').hidden = !isMac; $('macmap').textContent = macMap ? '⌘ = Ctrl' : '⌘ = Win'; }
+$('macmap').onclick = () => { releaseAll(); macMap = !macMap; store(localStorage, 'vmagent.macmap', macMap ? 'on' : 'off'); showMacMap(); focusInput(); };
+showMacMap();
 
 $('keys').onchange = (e) => {
   const codes = e.target.value ? e.target.value.split('+') : []; e.target.value = '';
   codes.forEach((c) => sendInput({ t: 'kd', c }));
   codes.slice().reverse().forEach((c) => sendInput({ t: 'ku', c }));
-  stage.focus();
+  focusInput();
 };
 $('quality').onchange = (e) => { store(localStorage, 'vmagent.quality', e.target.value); if (wanted) connect(); };
-$('fit').onclick = () => { const actual = document.body.classList.toggle('actual'); $('fit').textContent = actual ? '适应窗口' : '原始大小'; applyCursor(); stage.focus(); };
+$('fit').onclick = () => { const actual = document.body.classList.toggle('actual'); $('fit').textContent = actual ? '适应窗口' : '原始大小'; applyCursor(); focusInput(); };
 $('full').onclick = async () => {
   if (document.fullscreenElement) { await document.exitFullscreen(); return; }
   await document.documentElement.requestFullscreen();
   // Lets the page receive Win, Alt+Tab, Esc and the like; needs a secure origin.
   if (navigator.keyboard && navigator.keyboard.lock) navigator.keyboard.lock().catch(() => {});
-  stage.focus();
+  focusInput();
 };
 document.addEventListener('fullscreenchange', () => {
   document.body.classList.toggle('hidebar', !!document.fullscreenElement);

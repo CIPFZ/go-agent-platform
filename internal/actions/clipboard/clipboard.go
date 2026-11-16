@@ -28,6 +28,12 @@ type Backend interface {
 	WritePNG(ctx context.Context, png []byte) error
 }
 
+// Sequencer is implemented by backends that can tell cheaply whether the
+// clipboard changed: the number differs after every change by anyone.
+type Sequencer interface {
+	Sequence() uint32
+}
+
 // NewBackend returns the backend for the current platform and session.
 func NewBackend() Backend { return newBackend() }
 
@@ -40,6 +46,15 @@ type Service struct{ backend Backend }
 
 // NewService returns a Service over b.
 func NewService(b Backend) *Service { return &Service{backend: b} }
+
+// Sequence returns a number that changes whenever the clipboard content
+// does; ok is false when the platform cannot tell without reading it.
+func (s *Service) Sequence() (seq uint32, ok bool) {
+	if q, isSeq := s.backend.(Sequencer); isSeq {
+		return q.Sequence(), true
+	}
+	return 0, false
+}
 
 // Read returns the clipboard content.
 func (s *Service) Read(ctx context.Context) (Content, error) {

@@ -8,6 +8,7 @@ import (
 	"image"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
 
+	"github.com/CIPFZ/go-agent-platform/internal/actions/clipboard"
 	"github.com/CIPFZ/go-agent-platform/internal/actions/input"
 	"github.com/CIPFZ/go-agent-platform/internal/actions/screen"
 	"github.com/CIPFZ/go-agent-platform/internal/protocol"
@@ -389,5 +391,75 @@ func TestCodeKeysResolve(t *testing.T) {
 		if _, ok := keyForCode(code); !ok {
 			t.Errorf("%s maps to %q, which is not a key of docs/keys.md", code, name)
 		}
+	}
+}
+
+// fakeClipboard is a clipboard whose content and sequence number a test sets.
+type fakeClipboard struct {
+	mu   sync.Mutex
+	seq  uint32
+	text string
+}
+
+func (f *fakeClipboard) set(text string) {
+	f.mu.Lock()
+	f.text = text
+	f.seq++
+	f.mu.Unlock()
+}
+
+func (f *fakeClipboard) Sequence() uint32 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.seq
+}
+
+func (f *fakeClipboard) Read(context.Context) (clipboard.Content, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	text := f.text
+	return clipboard.Content{Formats: []string{"CF_UNICODETEXT"}, Text: &text}, nil
+}
+
+func (f *fakeClipboard) WriteText(_ context.Context, text string) error { f.set(text); return nil }
+func (f *fakeClipboard) WritePNG(context.Context, []byte) error         { return nil }
+
+func TestClipboardAndLockStateReachThePage(t *testing.T) {
+	cb := &fakeClipboard{text: "from before the session"}
+	var locked atomic.Bool
+	in := &fakeInput{}
+	m := New(Options{Input: input.NewService(in), Screen: screen.NewService(fakeScreen{}), Source: fakeSource{runs: make(chan Params, 4)},
+		Loopback: true, Clipboard: clipboard.NewService(cb), Desktop: func() Desktop { return Desktop{Locked: locked.Load()} }})
+	t.Cleanup(m.Shutdown)
+	v := newViewer(t)
+	res, err := m.Open(context.Background(), OpenRequest{SDP: v.offer, Holder: "alice", ClientID: "tab-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v.answer(res.SDP)
+	v.message("hello")
+
+	// Only what is copied during the session is sent, and long text is
+	// announced instead of carried.
+	time.Sleep(700 * time.Millisecond)
+	cb.set("copied on the desktop")
+	if m := v.message("clip"); m["text"] != "copied on the desktop" {
+		t.Fatalf("clip = %v", m)
+	}
+	cb.set(strings.Repeat("x", MaxClipboardText+1))
+	if m := v.message("clip"); m["large"] != true || m["text"] != nil {
+		t.Fatalf("large clip = %v", m)
+	}
+
+	locked.Store(true)
+	if m := v.message("desk"); m["locked"] != true {
+		t.Fatalf("desk = %v", m)
+	}
+	locked.Store(false)
+	if m := v.message("desk"); m["locked"] != false {
+		t.Fatalf("desk = %v", m)
+	}
+	if m.InUse() == nil {
+		t.Fatal("locking the desktop ended the session")
 	}
 }

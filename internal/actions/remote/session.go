@@ -130,17 +130,34 @@ func (s *session) onConnectionState(state webrtc.PeerConnectionState) {
 	}
 }
 
+func (s *session) locked() bool { return s.m.o.Desktop != nil && s.m.o.Desktop().Locked }
+
 func (s *session) video() {
-	err := s.m.src.Run(s.ctx, s.params, s.emit, func(st Status) {
-		s.mu.Lock()
-		s.status = st
-		s.mu.Unlock()
-		s.send(map[string]any{"t": "status", "capture": st.Capture, "encoder": st.Encoder})
-	})
-	if err != nil && s.ctx.Err() == nil {
-		logf("session %s: %v", s.id, err)
-		s.send(map[string]any{"t": "error", "message": err.Error()})
-		s.close("video_failed")
+	for s.ctx.Err() == nil {
+		err := s.m.src.Run(s.ctx, s.params, s.emit, func(st Status) {
+			s.mu.Lock()
+			s.status = st
+			s.mu.Unlock()
+			s.send(map[string]any{"t": "status", "capture": st.Capture, "encoder": st.Encoder})
+		})
+		if err == nil || s.ctx.Err() != nil {
+			return
+		}
+		// A locked desktop cannot be captured from this process. The session
+		// is kept and the video resumes when the desktop is unlocked.
+		if !s.locked() {
+			logf("session %s: %v", s.id, err)
+			s.send(map[string]any{"t": "error", "message": err.Error()})
+			s.close("video_failed")
+			return
+		}
+		for s.locked() {
+			select {
+			case <-s.ctx.Done():
+				return
+			case <-time.After(time.Second):
+			}
+		}
 	}
 }
 
@@ -176,6 +193,7 @@ func (s *session) onDataChannel(dc *webrtc.DataChannel) {
 			s.mu.Unlock()
 			s.send(map[string]any{"t": "hello", "session_id": s.id, "holder": s.holder})
 			go s.cursor()
+			go s.clipboard()
 		})
 		dc.OnMessage(func(msg webrtc.DataChannelMessage) { s.onControl(msg.Data) })
 	}
@@ -459,15 +477,60 @@ func (s *session) shape(ctx context.Context) (*cursorShape, error) {
 	}}, nil
 }
 
-// watch ends a session that never connects or that has been idle too long.
-func (s *session) watch() {
-	t := time.NewTicker(time.Second)
+// clipboard tells the page when the desktop's clipboard changes, so text
+// copied there can be pasted on the viewer's machine. Only changes made
+// after the session began are sent.
+func (s *session) clipboard() {
+	cb := s.m.o.Clipboard
+	if cb == nil {
+		return
+	}
+	last, ok := cb.Sequence()
+	if !ok {
+		return
+	}
+	t := time.NewTicker(300 * time.Millisecond)
 	defer t.Stop()
 	for {
 		select {
 		case <-s.ctx.Done():
 			return
 		case <-t.C:
+		}
+		seq, _ := cb.Sequence()
+		if seq == last {
+			continue
+		}
+		last = seq
+		ctx, cancel := context.WithTimeout(s.ctx, 3*time.Second)
+		content, err := cb.Read(ctx)
+		cancel()
+		if err != nil || content.Text == nil || *content.Text == "" {
+			continue
+		}
+		if len(*content.Text) > MaxClipboardText {
+			s.send(map[string]any{"t": "clip", "large": true})
+			continue
+		}
+		s.send(map[string]any{"t": "clip", "text": *content.Text})
+	}
+}
+
+// watch ends a session that never connects or that has been idle too long,
+// and tells the page when the desktop is locked or unlocked.
+func (s *session) watch() {
+	t := time.NewTicker(time.Second)
+	defer t.Stop()
+	wasLocked := false
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-t.C:
+		}
+		if locked := s.locked(); locked != wasLocked {
+			wasLocked = locked
+			s.send(map[string]any{"t": "desk", "locked": locked})
 		}
 		now := s.m.o.Now()
 		s.mu.Lock()

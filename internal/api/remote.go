@@ -34,6 +34,8 @@ func (a *API) newRemote(d Deps) *remote.Manager {
 		IdleRelease: d.Config.RemoteIdleRelease,
 		Input:       a.input,
 		Screen:      a.screen,
+		Clipboard:   a.clipboard,
+		Desktop:     func() remote.Desktop { return remote.Desktop{Locked: a.session().Locked} },
 		Source:      d.RemoteSource,
 		Loopback:    d.RemoteLoopback,
 		Now:         d.Now,

@@ -36,6 +36,7 @@ var (
 	procGetClipboardFormatNameW    = user32.NewProc("GetClipboardFormatNameW")
 	procRegisterClipboardFormatW   = user32.NewProc("RegisterClipboardFormatW")
 	procIsClipboardFormatAvailable = user32.NewProc("IsClipboardFormatAvailable")
+	procGetClipboardSequenceNumber = user32.NewProc("GetClipboardSequenceNumber")
 	procCreateWindowExW            = user32.NewProc("CreateWindowExW")
 	procGlobalAlloc                = kernel32.NewProc("GlobalAlloc")
 	procGlobalFree                 = kernel32.NewProc("GlobalFree")
@@ -116,6 +117,12 @@ func (b *win32Backend) open(ctx context.Context) error {
 }
 
 func closeClipboard() { procCloseClipboard.Call() }
+
+// Sequence is the window station's clipboard sequence number.
+func (b *win32Backend) Sequence() uint32 {
+	n, _, _ := procGetClipboardSequenceNumber.Call()
+	return uint32(n)
+}
 
 func (b *win32Backend) Read(ctx context.Context) (Content, error) {
 	var c Content

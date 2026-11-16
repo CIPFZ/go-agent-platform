@@ -19,6 +19,7 @@ import (
 	"github.com/pion/interceptor"
 	"github.com/pion/webrtc/v4"
 
+	"github.com/CIPFZ/go-agent-platform/internal/actions/clipboard"
 	"github.com/CIPFZ/go-agent-platform/internal/actions/input"
 	"github.com/CIPFZ/go-agent-platform/internal/actions/screen"
 	"github.com/CIPFZ/go-agent-platform/internal/protocol"
@@ -61,6 +62,13 @@ type Options struct {
 	IdleRelease time.Duration
 	Input       *input.Service
 	Screen      *screen.Service
+	// Clipboard lets the page follow the desktop's clipboard; nil turns
+	// that off.
+	Clipboard *clipboard.Service
+	// Desktop reports whether the desktop is locked or showing an elevation
+	// prompt, which this process can neither capture nor operate; nil means
+	// it never is.
+	Desktop func() Desktop
 	// Source overrides the ffmpeg pipeline (tests).
 	Source Source
 	// Loopback also offers loopback addresses, for a viewer on this machine.
@@ -71,6 +79,15 @@ type Options struct {
 	// OnEvent records session life cycle events for the audit log.
 	OnEvent func(kind string, details map[string]string)
 }
+
+// Desktop is the state of the interactive desktop.
+type Desktop struct {
+	Locked bool
+}
+
+// MaxClipboardText is the longest clipboard text sent to the page inside a
+// control message; longer text is fetched by the page from /v1/clipboard.
+const MaxClipboardText = 32 << 10
 
 // Manager owns the single remote session.
 type Manager struct {
