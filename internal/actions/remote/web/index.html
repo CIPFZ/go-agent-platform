@@ -56,12 +56,13 @@
     <option value="15,2000">15 帧 · 2 Mbps</option>
   </select>
   <button id="clip" hidden title="远端复制了新的文字；点击后复制到本机剪贴板">复制远端剪贴板</button>
+  <button id="sound" title="远端的声音">声音：关</button>
   <button id="macmap" hidden title="⌘ 键在远端当作 Ctrl 还是 Win 键"></button>
   <button id="fit" title="适应窗口 / 原始大小">原始大小</button>
   <button id="full" title="全屏。全屏时可捕获 Win、Alt+Tab、Esc 等系统键（需要先在 chrome://flags 里把本页地址标记为安全来源）">全屏</button>
   <button id="release" title="结束使用，让别人可以使用这台机器">释放</button>
 </div>
-<div id="stage"><video id="video" autoplay playsinline muted></video><textarea id="ime" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="键盘输入"></textarea></div>
+<div id="stage"><video id="video" autoplay playsinline muted></video><audio id="audio" autoplay></audio><textarea id="ime" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="键盘输入"></textarea></div>
 <div id="veil"><div id="card"></div></div>
 <script>
 'use strict';
@@ -110,6 +111,7 @@ async function connect() {
   setState('正在连接…');
   const me = pc = new RTCPeerConnection();
   pc.addTransceiver('video', { direction: 'recvonly' });
+  pc.addTransceiver('audio', { direction: 'recvonly' });
   chInput = pc.createDataChannel('input');
   chPointer = pc.createDataChannel('pointer', { ordered: false, maxRetransmits: 0 });
   chControl = pc.createDataChannel('control');
@@ -117,7 +119,9 @@ async function connect() {
   pc.ontrack = (e) => {
     // Show frames as soon as they are decoded instead of buffering for smoothness.
     try { e.receiver.playoutDelayHint = 0; e.receiver.jitterBufferTarget = 0; } catch (err) {}
-    video.srcObject = e.streams[0] || new MediaStream([e.track]);
+    // Sound gets its own element so that it never delays the picture.
+    if (e.track.kind === 'audio') { audio.srcObject = new MediaStream([e.track]); applySound(); return; }
+    video.srcObject = new MediaStream([e.track]);
     video.play().catch(() => {});
   };
   pc.onconnectionstatechange = () => {
@@ -331,6 +335,18 @@ async function fetchClip() {
 }
 $('clip').onclick = async () => { if (pendingClip !== null && await copyLocal(pendingClip)) { pendingClip = null; $('clip').hidden = true; } };
 
+// --- sound: browsers only start audio after the user has acted on the page
+const audio = $('audio');
+let soundOn = store(localStorage, 'vmagent.sound') !== 'off';
+function applySound() {
+  audio.muted = !soundOn;
+  let blocked = false;
+  const done = () => { $('sound').textContent = !soundOn ? '声音：关' : blocked ? '声音：点击开启' : '声音：开'; };
+  if (soundOn && audio.srcObject) audio.play().then(done, () => { blocked = true; done(); }); else done();
+}
+$('sound').onclick = () => { if (audio.paused && soundOn) { applySound(); } else { soundOn = !soundOn; store(localStorage, 'vmagent.sound', soundOn ? 'on' : 'off'); applySound(); } focusInput(); };
+applySound();
+
 function showMacMap() { $('macmap').hidden = !isMac; $('macmap').textContent = macMap ? '⌘ = Ctrl' : '⌘ = Win'; }
 $('macmap').onclick = () => { releaseAll(); macMap = !macMap; store(localStorage, 'vmagent.macmap', macMap ? 'on' : 'off'); showMacMap(); focusInput(); };
 showMacMap();
@@ -370,9 +386,10 @@ window.addEventListener('pagehide', () => { if (session) release(true); });
 // --- statistics, shown in the bar and reported to the agent
 async function stats() {
   if (!pc || !session) return;
-  const report = await pc.getStats(); let v = null, rtt = null;
+  const report = await pc.getStats(); let v = null, rtt = null, au = null;
   report.forEach((s) => {
     if (s.type === 'inbound-rtp' && s.kind === 'video') v = s;
+    if (s.type === 'inbound-rtp' && s.kind === 'audio') au = s;
     if (s.type === 'candidate-pair' && s.nominated && s.currentRoundTripTime !== undefined) rtt = s.currentRoundTripTime;
   });
   if (!v) return;
@@ -382,7 +399,8 @@ async function stats() {
   const dt = (now - prev.t) / 1000, emitted = v.jitterBufferEmittedCount - prev.emitted;
   const s = { fps: v.framesPerSecond || 0, kbps: Math.round((v.bytesReceived - prev.bytes) * 8 / dt / 1000), width: v.frameWidth, height: v.frameHeight,
     decoded: v.framesDecoded, dropped: v.framesDropped, lost: v.packetsLost, decoder: v.decoderImplementation || '',
-    buffer_ms: emitted > 0 ? Math.round((v.jitterBufferDelay - prev.delay) / emitted * 1000) : 0, rtt_ms: rtt === null ? null : Math.round(rtt * 1000) };
+    buffer_ms: emitted > 0 ? Math.round((v.jitterBufferDelay - prev.delay) / emitted * 1000) : 0, rtt_ms: rtt === null ? null : Math.round(rtt * 1000),
+    audio_packets: au ? au.packetsReceived : 0, audio_level: au && au.audioLevel !== undefined ? Math.round(au.audioLevel * 1000) / 1000 : null };
   const capture = { dda: '桌面复制', gdi: 'GDI（无活动显示器，约 16 帧）' }[status.capture] || status.capture || '';
   setState(holder + ' · ' + (s.width || '?') + '×' + (s.height || '?') + ' · ' + Math.round(s.fps) + ' 帧 · ' + (s.kbps / 1000).toFixed(1) + ' Mbps' +
     (s.rtt_ms === null ? '' : ' · 往返 ' + s.rtt_ms + ' ms') + ' · 缓冲 ' + s.buffer_ms + ' ms' + (capture ? ' · ' + capture : '') + (status.encoder ? ' / ' + status.encoder : ''),

@@ -60,11 +60,31 @@ func run(agent string, seconds, fps, kbps int, holder string, wiggle bool) error
 		return err
 	}
 
+	if _, err := pc.AddTransceiverFromKind(webrtc.RTPCodecTypeAudio, webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionRecvonly}); err != nil {
+		return err
+	}
+	var audioPackets, audioBytes, audioGaps atomic.Int64
 	var packets, bytesIn, frames, keyframes, gaps atomic.Int64
 	var firstPacket, firstKey atomic.Int64
 	var codec atomic.Value
 	start := time.Now()
 	pc.OnTrack(func(tr *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
+		if tr.Kind() == webrtc.RTPCodecTypeAudio {
+			var last uint16
+			have := false
+			for {
+				pkt, _, err := tr.ReadRTP()
+				if err != nil {
+					return
+				}
+				if have && pkt.SequenceNumber != last+1 {
+					audioGaps.Add(1)
+				}
+				last, have = pkt.SequenceNumber, true
+				audioPackets.Add(1)
+				audioBytes.Add(int64(len(pkt.Payload)))
+			}
+		}
 		codec.Store(tr.Codec().MimeType + " " + tr.Codec().SDPFmtpLine)
 		var last uint16
 		have := false
@@ -170,12 +190,12 @@ func run(agent string, seconds, fps, kbps int, holder string, wiggle bool) error
 		}
 	}
 
-	var prevFrames, prevBytes int64
+	var prevFrames, prevBytes, prevAudio int64
 	for i := 1; i <= seconds; i++ {
 		time.Sleep(time.Second)
-		f, b := frames.Load(), bytesIn.Load()
-		fmt.Printf("  %2ds  %3d frames  %6d kbit/s\n", i, f-prevFrames, (b-prevBytes)*8/1000)
-		prevFrames, prevBytes = f, b
+		f, b, a := frames.Load(), bytesIn.Load(), audioBytes.Load()
+		fmt.Printf("  %2ds  %3d frames  %6d kbit/s  audio %3d kbit/s\n", i, f-prevFrames, (b-prevBytes)*8/1000, (a-prevAudio)*8/1000)
+		prevFrames, prevBytes, prevAudio = f, b, a
 	}
 	elapsed := time.Since(start).Seconds()
 	c, _ := codec.Load().(string)
@@ -183,6 +203,8 @@ func run(agent string, seconds, fps, kbps int, holder string, wiggle bool) error
 	fmt.Printf("first packet %d ms, first keyframe %d ms after the answer\n", firstPacket.Load()/1e6, firstKey.Load()/1e6)
 	fmt.Printf("total        %d packets, %d frames (%.1f fps), %d keyframes, %d sequence gaps, %.0f kbit/s\n",
 		packets.Load(), frames.Load(), float64(frames.Load())/elapsed, keyframes.Load(), gaps.Load(), float64(bytesIn.Load())*8/1000/elapsed)
+	fmt.Printf("audio        %d packets (%.0f per second), %d sequence gaps, %.0f kbit/s\n", audioPackets.Load(), float64(audioPackets.Load())/elapsed,
+		audioGaps.Load(), float64(audioBytes.Load())*8/1000/elapsed)
 	mu.Lock()
 	for _, t := range []string{"hello", "status", "cursor", "error", "bye"} {
 		if v, ok := seen[t]; ok {

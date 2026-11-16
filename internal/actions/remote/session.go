@@ -74,14 +74,11 @@ type session struct {
 	wheelX  float64
 	wheelY  float64
 
-	// Owned by the source goroutine: one continuous RTP sequence across
-	// pipeline restarts.
-	haveSSRC bool
-	ssrc     uint32
-	seqOff   uint16
-	tsOff    uint32
-	lastSeq  uint16
-	lastTS   uint32
+	// One continuous RTP stream per track across pipeline restarts; each is
+	// owned by its source goroutine.
+	videoSplice, audioSplice splicer
+	audioTrack               *webrtc.TrackLocalStaticRTP
+	audioOn                  atomic.Bool
 
 	packets, frames, keyEvents, mouseEvents atomic.Uint64
 }
@@ -102,7 +99,7 @@ func (s *session) info() Info {
 	i := Info{SessionID: s.id, Holder: s.holder, Remote: s.remote, State: s.state, StartedAt: s.started.UTC(),
 		FPS: s.params.FPS, BitrateKbps: s.params.BitrateKbps, Capture: s.status.Capture, Encoder: s.status.Encoder,
 		PacketsSent: s.packets.Load(), FramesSent: s.frames.Load(), KeyEvents: s.keyEvents.Load(), MouseEvents: s.mouseEvents.Load(),
-		Client: s.client}
+		Client: s.client, Audio: s.audioOn.Load()}
 	if s.keyEvents.Load()+s.mouseEvents.Load() > 0 {
 		t := s.lastInput.UTC()
 		i.LastInputAt = &t
@@ -122,6 +119,9 @@ func (s *session) onConnectionState(state webrtc.PeerConnectionState) {
 			// The encoder starts once the path is up, so its first keyframe
 			// is not sent into a connection that is still being made.
 			go s.video()
+			if s.audioTrack != nil {
+				go s.audio()
+			}
 		}
 	case webrtc.PeerConnectionStateFailed:
 		s.close("connection_lost")
@@ -161,20 +161,49 @@ func (s *session) video() {
 	}
 }
 
-// emit forwards one packet of the pipeline. A restarted pipeline begins a
-// new RTP stream; it is spliced onto the previous one so the viewer sees a
-// single stream that resumes at the next keyframe.
-func (s *session) emit(pkt *rtp.Packet) {
-	if !s.haveSSRC || pkt.SSRC != s.ssrc {
-		if s.haveSSRC {
-			s.seqOff = s.lastSeq + 1 - pkt.SequenceNumber
-			s.tsOff = s.lastTS + uint32(90000/s.params.FPS) - pkt.Timestamp
+// splicer joins the RTP streams of successive pipeline runs into one: a
+// restarted pipeline begins a new stream with its own numbering.
+type splicer struct {
+	have    bool
+	ssrc    uint32
+	seqOff  uint16
+	tsOff   uint32
+	lastSeq uint16
+	lastTS  uint32
+}
+
+// apply renumbers pkt; step is the timestamp gap left between two streams.
+func (sp *splicer) apply(pkt *rtp.Packet, step uint32) {
+	if !sp.have || pkt.SSRC != sp.ssrc {
+		if sp.have {
+			sp.seqOff = sp.lastSeq + 1 - pkt.SequenceNumber
+			sp.tsOff = sp.lastTS + step - pkt.Timestamp
 		}
-		s.haveSSRC, s.ssrc = true, pkt.SSRC
+		sp.have, sp.ssrc = true, pkt.SSRC
 	}
-	pkt.SequenceNumber += s.seqOff
-	pkt.Timestamp += s.tsOff
-	s.lastSeq, s.lastTS = pkt.SequenceNumber, pkt.Timestamp
+	pkt.SequenceNumber += sp.seqOff
+	pkt.Timestamp += sp.tsOff
+	sp.lastSeq, sp.lastTS = pkt.SequenceNumber, pkt.Timestamp
+}
+
+// audio forwards the desktop's sound. It is optional: when it cannot be
+// captured the session goes on without it.
+func (s *session) audio() {
+	err := s.m.aud.Run(s.ctx, func(pkt *rtp.Packet) {
+		s.audioSplice.apply(pkt, 480)
+		s.audioOn.Store(true)
+		_ = s.audioTrack.WriteRTP(pkt)
+	})
+	s.audioOn.Store(false)
+	if err != nil && s.ctx.Err() == nil {
+		logf("session %s: audio: %v", s.id, err)
+	}
+}
+
+// emit forwards one video packet; the viewer sees a single stream that
+// resumes at the next keyframe after a pipeline restart.
+func (s *session) emit(pkt *rtp.Packet) {
+	s.videoSplice.apply(pkt, uint32(90000/s.params.FPS))
 	s.packets.Add(1)
 	if pkt.Marker {
 		s.frames.Add(1)

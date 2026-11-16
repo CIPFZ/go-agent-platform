@@ -689,12 +689,14 @@ type RemoteSession struct {
 	Fps         int        `json:"fps"`
 	BitrateKbps int        `json:"bitrate_kbps"`
 	// dda (Desktop Duplication) or gdi; empty until video starts. gdi is used while no display is active, such as a closed laptop lid, and is limited to about 16 frames a second.
-	Capture     string `json:"capture"`
-	Encoder     string `json:"encoder"`
-	PacketsSent int64  `json:"packets_sent"`
-	FramesSent  int64  `json:"frames_sent"`
-	KeyEvents   int64  `json:"key_events"`
-	MouseEvents int64  `json:"mouse_events"`
+	Capture string `json:"capture"`
+	Encoder string `json:"encoder"`
+	// True while the desktop's sound is being sent.
+	Audio       bool  `json:"audio"`
+	PacketsSent int64 `json:"packets_sent"`
+	FramesSent  int64 `json:"frames_sent"`
+	KeyEvents   int64 `json:"key_events"`
+	MouseEvents int64 `json:"mouse_events"`
 	// What the page last reported about its decoder.
 	Client map[string]any `json:"client,omitempty"`
 }
@@ -1423,8 +1425,11 @@ func (c *Client) RemotePage(ctx context.Context, opts ...Option) (*StreamRespons
 // RemoteOpen calls POST /v1/remote/sessions: Take the desktop for a browser session.
 //
 // Answers a browser's WebRTC offer, which must offer to receive H.264
-// video and may open the data channels input (reliable), pointer
-// (unreliable, pointer moves) and control. The session is the lease on
+// video, may offer to receive audio (the desktop's sound as Opus) and
+// may open the data channels input (reliable), pointer (unreliable,
+// pointer moves) and control. The control channel carries the pointer
+// shape, clipboard text copied on the desktop and whether the desktop
+// is locked. The session is the lease on
 // the desktop: one person at a time. While it is held, another caller
 // gets conflict with details.reason=remote_in_use, holder and since, and
 // so does every input/* request. A request carrying the client_id of

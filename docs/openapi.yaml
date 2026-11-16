@@ -1126,8 +1126,11 @@ paths:
       summary: Take the desktop for a browser session
       description: |
         Answers a browser's WebRTC offer, which must offer to receive H.264
-        video and may open the data channels input (reliable), pointer
-        (unreliable, pointer moves) and control. The session is the lease on
+        video, may offer to receive audio (the desktop's sound as Opus) and
+        may open the data channels input (reliable), pointer (unreliable,
+        pointer moves) and control. The control channel carries the pointer
+        shape, clipboard text copied on the desktop and whether the desktop
+        is locked. The session is the lease on
         the desktop: one person at a time. While it is held, another caller
         gets conflict with details.reason=remote_in_use, holder and since, and
         so does every input/* request. A request carrying the client_id of
@@ -1906,7 +1909,7 @@ components:
         idle_release_ms: {type: integer, format: int64, description: The session ends after this long without input; 0 never.}
     RemoteSession:
       type: object
-      required: [session_id, holder, remote, state, started_at, last_input_at, fps, bitrate_kbps, capture, encoder, packets_sent, frames_sent, key_events, mouse_events]
+      required: [session_id, holder, remote, state, started_at, last_input_at, fps, bitrate_kbps, capture, encoder, audio, packets_sent, frames_sent, key_events, mouse_events]
       properties:
         session_id: {type: string}
         holder: {type: string}
@@ -1918,6 +1921,7 @@ components:
         bitrate_kbps: {type: integer}
         capture: {type: string, description: "dda (Desktop Duplication) or gdi; empty until video starts. gdi is used while no display is active, such as a closed laptop lid, and is limited to about 16 frames a second."}
         encoder: {type: string}
+        audio: {type: boolean, description: True while the desktop's sound is being sent.}
         packets_sent: {type: integer, format: int64}
         frames_sent: {type: integer, format: int64}
         key_events: {type: integer, format: int64}

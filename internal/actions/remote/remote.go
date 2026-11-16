@@ -71,6 +71,8 @@ type Options struct {
 	Desktop func() Desktop
 	// Source overrides the ffmpeg pipeline (tests).
 	Source Source
+	// Audio overrides the capture of the desktop's sound (tests).
+	Audio AudioSource
 	// Loopback also offers loopback addresses, for a viewer on this machine.
 	Loopback bool
 	Now      func() time.Time
@@ -93,6 +95,7 @@ const MaxClipboardText = 32 << 10
 type Manager struct {
 	o   Options
 	src Source
+	aud AudioSource
 
 	initOnce sync.Once
 	initErr  error
@@ -113,7 +116,11 @@ func New(o Options) *Manager {
 	if src == nil {
 		src = newFFmpegSource(o.FFmpeg)
 	}
-	return &Manager{o: o, src: src}
+	aud := o.Audio
+	if aud == nil {
+		aud = newFFmpegAudio(o.FFmpeg)
+	}
+	return &Manager{o: o, src: src, aud: aud}
 }
 
 // Available reports why sessions cannot be opened, or nil.
@@ -144,6 +151,14 @@ func (m *Manager) init() error {
 				m.initErr = err
 				return
 			}
+		}
+		if err := media.RegisterCodec(webrtc.RTPCodecParameters{
+			RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus, ClockRate: 48000, Channels: 2,
+				SDPFmtpLine: "minptime=10;useinbandfec=1"},
+			PayloadType: 111,
+		}, webrtc.RTPCodecTypeAudio); err != nil {
+			m.initErr = err
+			return
 		}
 		registry := &interceptor.Registry{}
 		if err := webrtc.RegisterDefaultInterceptors(media, registry); err != nil {
@@ -202,10 +217,12 @@ type Info struct {
 	BitrateKbps int        `json:"bitrate_kbps"`
 	Capture     string     `json:"capture"`
 	Encoder     string     `json:"encoder"`
-	PacketsSent uint64     `json:"packets_sent"`
-	FramesSent  uint64     `json:"frames_sent"`
-	KeyEvents   uint64     `json:"key_events"`
-	MouseEvents uint64     `json:"mouse_events"`
+	// Audio is true while the desktop's sound is being sent.
+	Audio       bool   `json:"audio"`
+	PacketsSent uint64 `json:"packets_sent"`
+	FramesSent  uint64 `json:"frames_sent"`
+	KeyEvents   uint64 `json:"key_events"`
+	MouseEvents uint64 `json:"mouse_events"`
 	// Client is what the viewer last reported about its decoder.
 	Client map[string]any `json:"client,omitempty"`
 }
@@ -332,6 +349,26 @@ func (m *Manager) connect(ctx context.Context, s *session, offer string) (string
 			}
 		}
 	}()
+	// Sound is sent when the page asks for it and it can be captured.
+	if strings.Contains(offer, "m=audio") && m.aud.Available() == nil {
+		audio, err := webrtc.NewTrackLocalStaticRTP(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus, ClockRate: 48000, Channels: 2}, "audio", "vm-agent-audio")
+		if err != nil {
+			return "", err
+		}
+		audioSender, err := pc.AddTrack(audio)
+		if err != nil {
+			return "", protocol.Errorf(protocol.CodeIOFailed, "add the audio track: %v", err)
+		}
+		go func() {
+			buf := make([]byte, 1500)
+			for {
+				if _, _, err := audioSender.Read(buf); err != nil {
+					return
+				}
+			}
+		}()
+		s.audioTrack = audio
+	}
 	pc.OnDataChannel(s.onDataChannel)
 	pc.OnConnectionStateChange(s.onConnectionState)
 	if err := pc.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: offer}); err != nil {
