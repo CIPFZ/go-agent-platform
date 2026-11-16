@@ -100,6 +100,22 @@ func (sendInputBackend) Scroll(dx, dy int) error {
 	return send(win.MouseHWheel, dx)
 }
 
+// ScrollDelta sends raw wheel deltas (120 per notch), for sources such as
+// trackpads that scroll by less than a notch.
+func (sendInputBackend) ScrollDelta(dx, dy int) error {
+	if dy != 0 {
+		if err := win.SendMouse(0, 0, uint32(int32(dy)), win.MouseWheel); err != nil {
+			return blocked(err)
+		}
+	}
+	if dx != 0 {
+		if err := win.SendMouse(0, 0, uint32(int32(dx)), win.MouseHWheel); err != nil {
+			return blocked(err)
+		}
+	}
+	return nil
+}
+
 func (sendInputBackend) Key(k Key, down bool) error {
 	var flags uint32
 	if k.Ext {

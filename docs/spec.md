@@ -148,6 +148,9 @@ Windows 进程启动后首先调用 `SetProcessDpiAwarenessContext(DPI_AWARENESS
 -upload-s3-access-key-file  存放访问密钥的文件，启用上传时必填，每次上传重新读取
 -upload-s3-secret-key-file  存放私钥的文件，启用上传时必填，每次上传重新读取
 -upload-s3-insecure  使用明文 HTTP 连接端点，默认关闭，仅用于受信任的内网
+-remote              启用网页远程桌面（/remote/），仅 Windows，见 remote-desktop-design.md
+-remote-udp-port     网页远程桌面的视频、声音与输入所用的 UDP 端口，默认 7071
+-remote-idle-release 网页远程桌面无输入多久后自动释放使用权，默认 10m，0 表示不自动释放
 ```
 
 启用上传时上述参数在启动时校验（不连接端点），不合法则拒绝启动。密钥只通过文件传入，不出现在命令行与审计中。

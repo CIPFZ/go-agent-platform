@@ -268,6 +268,26 @@ func (x *Exec) Drag(ctx context.Context, from, to Point, btn Button, duration ti
 // Scroll scrolls by wheel ticks.
 func (x *Exec) Scroll(dx, dy int) error { return x.b().Scroll(dx, dy) }
 
+// WheelDelta is the wheel delta of one notch.
+const WheelDelta = 120
+
+// FineScroller is implemented by backends that accept wheel deltas smaller
+// than one notch.
+type FineScroller interface {
+	ScrollDelta(dx, dy int) error
+}
+
+// ScrollDelta scrolls by raw wheel deltas (WheelDelta per notch; positive dy
+// scrolls up, positive dx right). handled is false when the backend only
+// scrolls by whole notches, in which case nothing was sent.
+func (x *Exec) ScrollDelta(dx, dy int) (handled bool, err error) {
+	fs, ok := x.b().(FineScroller)
+	if !ok {
+		return false, nil
+	}
+	return true, fs.ScrollDelta(dx, dy)
+}
+
 // Type types text one character at a time with interval between characters.
 // "\n" presses Enter and "\t" presses Tab; "\r\n" counts as one Enter.
 func (x *Exec) Type(ctx context.Context, text string, interval time.Duration, scancode bool) error {

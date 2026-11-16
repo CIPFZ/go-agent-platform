@@ -85,6 +85,7 @@
 | 剪贴板 | `GET /v1/clipboard`、`POST /v1/clipboard` |
 | 录屏 | `POST /v1/record/{start,stop}`、`GET /v1/record/list`、`GET|DELETE /v1/record/{session_id}`、`POST /v1/record/{session_id}/upload`（可选，需 `-upload-s3-*`） |
 | 无障碍 | `POST /v1/a11y/tree`（阶段 3） |
+| 网页远程桌面 | `GET /remote/`、`POST|GET /v1/remote/sessions`、`DELETE /v1/remote/sessions/{session_id}`（阶段 4，仅 Windows，需 `-remote`；见 [`remote-desktop-design.md`](remote-desktop-design.md)） |
 
 Wayland 会话（阶段 3）只提供 `screen/capture`、`screen/info` 与 `input/*`：截图经 xdg-desktop-portal Screenshot，整个桌面作为一个显示器上报，光标位置不可得（截图不叠加光标，`cursor` 为 0,0；`screen/cursor` 返回 `unsupported`）；输入经 uinput 虚拟设备，文本限于美式布局的可打印 ASCII，若 uinput 不可写而存在 portal RemoteDesktop 的 restore token，则改用 portal（可输入任意字符）。`window/*`、`clipboard`、`record/*`、`a11y/tree` 返回 `unsupported`，`capabilities.actions` 也不含它们。
 

@@ -26,6 +26,9 @@ func TestDefaultsMatchSpec(t *testing.T) {
 		RecordRetention: 24 * time.Hour,
 		JobDir:          filepath.Join(base, "jobs"),
 		JobRetention:    24 * time.Hour,
+
+		RemoteUDPPort:     7071,
+		RemoteIdleRelease: 10 * time.Minute,
 	}
 	if !reflect.DeepEqual(cfg, want) {
 		t.Fatalf("defaults:\n got %+v\nwant %+v", cfg, want)

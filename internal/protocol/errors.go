@@ -75,6 +75,9 @@ const (
 	// shutdown grace period ended (spec 4.4); its action was cancelled.
 	ReasonAgentShutdown  = "agent_shutdown"
 	ReasonSHA256Mismatch = "sha256_mismatch"
+	// ReasonRemoteInUse marks a request refused because a person is using
+	// the desktop through the web remote desktop.
+	ReasonRemoteInUse = "remote_in_use"
 )
 
 // Error is the error object of an error response (spec section 5.4).

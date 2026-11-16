@@ -5,7 +5,9 @@
 // default the primary monitor) with a borderless topmost window, and appends
 // the physical screen coordinates of every WM_LBUTTONDOWN to a log file, so
 // click positions can be compared with the requested ones at each display
-// scale (spec 13.1 acceptance 1).
+// scale (spec 13.1 acceptance 1). With -flash every click also flips the
+// window between white and black at once, which gives the remote desktop's
+// latency test a change it can time (docs/remote-desktop-design.md).
 package main
 
 import (
@@ -35,6 +37,10 @@ var (
 	pMetric = user32.NewProc("GetSystemMetrics")
 	pCursor = user32.NewProc("LoadCursorW")
 	pStock  = gdi32.NewProc("GetStockObject")
+	pInval  = user32.NewProc("InvalidateRect")
+	pUpdate = user32.NewProc("UpdateWindow")
+	pRect   = user32.NewProc("GetClientRect")
+	pFill   = user32.NewProc("FillRect")
 	pModule = kernel.NewProc("GetModuleHandleW")
 )
 
@@ -45,7 +51,9 @@ const (
 	wmDestroy      = 0x0002
 	wmClose        = 0x0010
 	wmLButtonDown  = 0x0201
+	wmEraseBkgnd   = 0x0014
 	whiteBrush     = 0
+	blackBrush     = 4
 	idcCross       = 32515
 	smCXScreen     = 0
 	smCYScreen     = 1
@@ -81,14 +89,38 @@ type msg struct {
 
 var logFile *os.File
 
+// flash and dark implement -flash: each click toggles dark and repaints.
+var flash, dark bool
+
+type rect struct{ left, top, right, bottom int32 }
+
 func wndProc(hwnd, message, wParam, lParam uintptr) uintptr {
 	switch message {
 	case wmLButtonDown:
 		p := point{x: int32(int16(lParam & 0xffff)), y: int32(int16((lParam >> 16) & 0xffff))}
 		pC2S.Call(hwnd, uintptr(unsafe.Pointer(&p)))
+		if flash {
+			// Repaint before logging so the change is on screen as early as
+			// the click allows.
+			dark = !dark
+			pInval.Call(hwnd, 0, 1)
+			pUpdate.Call(hwnd)
+		}
 		fmt.Fprintf(logFile, "%d,%d\n", p.x, p.y)
 		logFile.Sync()
 		return 0
+	case wmEraseBkgnd:
+		if flash {
+			var rc rect
+			pRect.Call(hwnd, uintptr(unsafe.Pointer(&rc)))
+			id := uintptr(whiteBrush)
+			if dark {
+				id = blackBrush
+			}
+			brush, _, _ := pStock.Call(id)
+			pFill.Call(wParam, uintptr(unsafe.Pointer(&rc)), brush)
+			return 1
+		}
 	case wmClose:
 		fmt.Fprintln(logFile, "close")
 		logFile.Sync()
@@ -107,6 +139,7 @@ func main() {
 	y := flag.Int("y", 0, "top")
 	w := flag.Int("w", 0, "width (default: primary monitor)")
 	h := flag.Int("h", 0, "height (default: primary monitor)")
+	flag.BoolVar(&flash, "flash", false, "flip between white and black on every click")
 	flag.Parse()
 	runtime.LockOSThread()
 	pSetDPI.Call(dpiPerMonitor2)

@@ -116,6 +116,9 @@ func (a *API) actions(displayReady bool) []string {
 	if a.uploader != nil {
 		out = append(out, "record_upload")
 	}
+	if displayReady && !a.wayland && a.remoteEnabled() == nil {
+		out = append(out, "remote")
+	}
 	return out
 }
 

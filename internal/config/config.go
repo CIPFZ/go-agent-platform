@@ -40,6 +40,11 @@ type Config struct {
 	UploadS3AccessKeyFile string
 	UploadS3SecretKeyFile string
 	UploadS3Insecure      bool
+
+	// Web remote desktop (docs/remote-desktop-design.md).
+	Remote            bool
+	RemoteUDPPort     int
+	RemoteIdleRelease time.Duration
 }
 
 // DefaultBaseDir is the per-user state root used by the defaults: the user
@@ -78,6 +83,9 @@ func Parse(args []string, output io.Writer) (*Config, error) {
 	fs.StringVar(&cfg.UploadS3AccessKeyFile, "upload-s3-access-key-file", "", "file holding the S3 access key, reread on every upload")
 	fs.StringVar(&cfg.UploadS3SecretKeyFile, "upload-s3-secret-key-file", "", "file holding the S3 secret key, reread on every upload")
 	fs.BoolVar(&cfg.UploadS3Insecure, "upload-s3-insecure", false, "use plain HTTP for the S3 endpoint")
+	fs.BoolVar(&cfg.Remote, "remote", false, "enable the web remote desktop at /remote/")
+	fs.IntVar(&cfg.RemoteUDPPort, "remote-udp-port", 7071, "UDP port carrying the remote desktop's video and input")
+	fs.DurationVar(&cfg.RemoteIdleRelease, "remote-idle-release", 10*time.Minute, "release the remote desktop after this long without input, 0 never")
 	if err := fs.Parse(args); err != nil {
 		return nil, err
 	}
@@ -107,6 +115,10 @@ func Parse(args []string, output io.Writer) (*Config, error) {
 		return nil, errors.New("-record-quota must be positive")
 	case cfg.RecordRetention <= 0 || cfg.JobRetention <= 0:
 		return nil, errors.New("retention durations must be positive")
+	case cfg.RemoteUDPPort < 1 || cfg.RemoteUDPPort > 65535:
+		return nil, errors.New("-remote-udp-port must be 1 to 65535")
+	case cfg.RemoteIdleRelease < 0:
+		return nil, errors.New("-remote-idle-release must not be negative")
 	}
 	return cfg, nil
 }

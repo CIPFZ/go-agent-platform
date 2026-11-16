@@ -36,6 +36,7 @@ tags:
   - name: clipboard
   - name: record
   - name: a11y
+  - name: remote
 
 paths:
   /v1/probe:
@@ -1099,6 +1100,91 @@ paths:
                     properties: {result: {$ref: '#/components/schemas/A11yTreeResult'}}
         default: {$ref: '#/components/responses/Error'}
 
+  /remote/:
+    get:
+      operationId: remotePage
+      tags: [remote]
+      summary: The web remote desktop page
+      description: |
+        The viewer for a browser (docs/remote-desktop-design.md). It opens a
+        session with POST /v1/remote/sessions and then exchanges video and
+        input over WebRTC on the UDP port given by -remote-udp-port.
+        unsupported unless vm-agent runs with -remote and ffmpeg is available.
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      responses:
+        '200':
+          description: HTML page.
+          content:
+            text/html:
+              schema: {type: string, format: binary}
+        default: {$ref: '#/components/responses/Error'}
+
+  /v1/remote/sessions:
+    post:
+      operationId: remoteOpen
+      tags: [remote]
+      summary: Take the desktop for a browser session
+      description: |
+        Answers a browser's WebRTC offer, which must offer to receive H.264
+        video, may offer to receive audio (the desktop's sound as Opus) and
+        may open the data channels input (reliable), pointer (unreliable,
+        pointer moves) and control. The control channel carries the pointer
+        shape, clipboard text copied on the desktop and whether the desktop
+        is locked. The session is the lease on
+        the desktop: one person at a time. While it is held, another caller
+        gets conflict with details.reason=remote_in_use, holder and since, and
+        so does every input/* request. A request carrying the client_id of
+        the current session replaces that session (a page reconnecting).
+        The session ends when the page releases it, the connection is lost
+        for 30 seconds, no input arrives for -remote-idle-release, or it is
+        deleted. Keys and buttons still held are then released.
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RemoteOpenRequest'}
+      responses:
+        '200':
+          description: The answer and the viewed display.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties: {result: {$ref: '#/components/schemas/RemoteOpenResult'}}
+        default: {$ref: '#/components/responses/Error'}
+    get:
+      operationId: remoteList
+      tags: [remote]
+      summary: The current remote session, if any
+      parameters: [{$ref: '#/components/parameters/RequestID'}, {$ref: '#/components/parameters/TimeoutMS'}]
+      responses:
+        '200':
+          description: Sessions; at most one.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties: {result: {$ref: '#/components/schemas/RemoteListResult'}}
+        default: {$ref: '#/components/responses/Error'}
+
+  /v1/remote/sessions/{session_id}:
+    delete:
+      operationId: remoteClose
+      tags: [remote]
+      summary: End a remote session and release the desktop
+      parameters:
+        - {$ref: '#/components/parameters/RequestID'}
+        - {$ref: '#/components/parameters/TimeoutMS'}
+        - {$ref: '#/components/parameters/SessionID'}
+      responses:
+        '200': {$ref: '#/components/responses/Empty'}
+        default: {$ref: '#/components/responses/Error'}
+
 components:
   parameters:
     RequestID:
@@ -1800,6 +1886,54 @@ components:
         sessions:
           type: array
           items: {$ref: '#/components/schemas/RecordSession'}
+    RemoteOpenRequest:
+      type: object
+      required: [sdp, holder]
+      properties:
+        sdp: {type: string, description: The browser's WebRTC offer with its ICE candidates gathered.}
+        holder: {type: string, description: Name of the person, shown to others while the desktop is taken; 1 to 64 bytes.}
+        client_id: {type: string, description: Identifies the page so that its reconnect replaces its own session.}
+        fps: {type: integer, minimum: 5, maximum: 60, description: Default 30.}
+        bitrate_kbps: {type: integer, minimum: 500, maximum: 50000, description: Default scales with the display, 8000 at 2560x1600.}
+        display: {type: integer, description: Only 0, the primary display.}
+    RemoteOpenResult:
+      type: object
+      required: [session_id, sdp, display, scale, fps, bitrate_kbps, idle_release_ms]
+      properties:
+        session_id: {type: string}
+        sdp: {type: string, description: The WebRTC answer.}
+        display: {$ref: '#/components/schemas/Rect'}
+        scale: {type: number}
+        fps: {type: integer}
+        bitrate_kbps: {type: integer}
+        idle_release_ms: {type: integer, format: int64, description: The session ends after this long without input; 0 never.}
+    RemoteSession:
+      type: object
+      required: [session_id, holder, remote, state, started_at, last_input_at, fps, bitrate_kbps, capture, encoder, audio, packets_sent, frames_sent, key_events, mouse_events]
+      properties:
+        session_id: {type: string}
+        holder: {type: string}
+        remote: {type: string, description: Address the session was opened from.}
+        state: {type: string, enum: [connecting, connected]}
+        started_at: {type: string, format: date-time}
+        last_input_at: {type: string, format: date-time, nullable: true}
+        fps: {type: integer}
+        bitrate_kbps: {type: integer}
+        capture: {type: string, description: "dda (Desktop Duplication) or gdi; empty until video starts. gdi is used while no display is active, such as a closed laptop lid, and is limited to about 16 frames a second."}
+        encoder: {type: string}
+        audio: {type: boolean, description: True while the desktop's sound is being sent.}
+        packets_sent: {type: integer, format: int64}
+        frames_sent: {type: integer, format: int64}
+        key_events: {type: integer, format: int64}
+        mouse_events: {type: integer, format: int64}
+        client: {type: object, additionalProperties: true, description: What the page last reported about its decoder.}
+    RemoteListResult:
+      type: object
+      required: [sessions]
+      properties:
+        sessions:
+          type: array
+          items: {$ref: '#/components/schemas/RemoteSession'}
     RecordUploadRequest:
       type: object
       properties:
