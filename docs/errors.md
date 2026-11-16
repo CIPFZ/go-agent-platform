@@ -56,6 +56,7 @@
 | `region_out_of_bounds` | `invalid_request` | `screen/capture` | `region` 与所选显示器完全不相交 |
 | `unknown_key` | `invalid_request` | `input/key/*`、`input/batch` | 键名不在 `docs/keys.md` |
 | `foreground_lock` | `io_failed` | `window/activate` | 系统拒绝把窗口置于前台：Windows 依次尝试 `SetForegroundWindow`、`AttachThreadInput`、注入 Alt 后仍失败；Linux 窗口管理器 1 秒内未激活该窗口 |
+| `remote_in_use` | `conflict` | `remote/sessions`、`input/*` | 有人正在通过网页远程桌面使用这台机器；`details.holder` 是使用者，`details.since` 是开始时间。使用权释放后重试 |
 
 ## details 其他字段
 

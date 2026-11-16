@@ -56,6 +56,9 @@ func (a *API) inputSingle(typ string) server.HandlerFunc {
 		if err := a.requireDisplay(); err != nil {
 			return nil, err
 		}
+		if err := a.remoteInUse(); err != nil {
+			return nil, err
+		}
 		err = a.input.Run(ctx, func(ctx context.Context, x *input.Exec) error { return act.Run(ctx, x) })
 		if err != nil {
 			return nil, a.displayError(err)
@@ -77,6 +80,9 @@ func (a *API) inputBatch(c *server.Call) (any, error) {
 	c.Param("actions", strconv.Itoa(len(batch.Actions)))
 	ctx := c.Context(batch.DefaultTimeout())
 	if err := a.requireDisplay(); err != nil {
+		return nil, err
+	}
+	if err := a.remoteInUse(); err != nil {
 		return nil, err
 	}
 	executed := 0

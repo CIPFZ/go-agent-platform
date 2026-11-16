@@ -22,6 +22,7 @@ import (
 	"github.com/CIPFZ/go-agent-platform/internal/actions/input"
 	"github.com/CIPFZ/go-agent-platform/internal/actions/process"
 	"github.com/CIPFZ/go-agent-platform/internal/actions/record"
+	"github.com/CIPFZ/go-agent-platform/internal/actions/remote"
 	"github.com/CIPFZ/go-agent-platform/internal/actions/screen"
 	"github.com/CIPFZ/go-agent-platform/internal/actions/session"
 	"github.com/CIPFZ/go-agent-platform/internal/actions/window"
@@ -55,6 +56,10 @@ type Deps struct {
 	Wayland bool
 	// Uploader is the optional object-storage uploader; nil disables it.
 	Uploader *upload.Uploader
+	// RemoteSource replaces the remote desktop's ffmpeg pipeline and
+	// RemoteLoopback lets a viewer on this machine connect (tests).
+	RemoteSource   remote.Source
+	RemoteLoopback bool
 	// RecordGrabArgs overrides ffmpeg's input arguments (tests).
 	RecordGrabArgs func(fps int, r protocol.Rect) ([]string, error)
 	Session        func() session.State
@@ -81,6 +86,8 @@ type API struct {
 	downloader *file.Downloader
 	jobs       *exec.Jobs
 	recorder   *record.Recorder
+	// remote is the web remote desktop; nil unless -remote is set.
+	remote *remote.Manager
 
 	a11yAvailable func() bool
 	a11yCollect   func(ctx context.Context, r a11y.Request) (*a11y.Result, error)
@@ -196,6 +203,7 @@ func NewWithDeps(d Deps) (*API, error) {
 		stopJanitor: make(chan struct{}),
 		janitorDone: make(chan struct{}),
 	}
+	a.remote = a.newRemote(d)
 	if a.a11yAvailable == nil {
 		a.a11yAvailable = a11y.Available
 	}
@@ -254,6 +262,9 @@ func (a *API) Shutdown() {
 	a.shutdownOnce.Do(func() {
 		close(a.stopJanitor)
 		<-a.janitorDone
+		if a.remote != nil {
+			a.remote.Shutdown() // ends the session and releases held keys
+		}
 		a.recorder.Shutdown() // step 3: finish recordings cleanly
 		a.jobs.Shutdown()     // step 4: kill background jobs
 	})
@@ -277,6 +288,7 @@ func (a *API) Routes() []*server.Route {
 	r = append(r, a.clipboardRoutes()...)
 	r = append(r, a.recordRoutes()...)
 	r = append(r, a.a11yRoutes()...)
+	r = append(r, a.remoteRoutes()...)
 	r = append(r, a.fileRoutes()...)
 	return r
 }

@@ -55,6 +55,11 @@ type Backend interface {
 // NewBackend returns the backend for the current platform and session.
 func NewBackend() Backend { return newBackend() }
 
+// CursorImage returns the current pointer shape under ctx.
+func (s *Service) CursorImage(ctx context.Context) (*CursorImage, error) {
+	return async.Run(ctx, s.backend.CursorImage)
+}
+
 // Options are the screen/capture request parameters (spec section 6.2).
 type Options struct {
 	Display int

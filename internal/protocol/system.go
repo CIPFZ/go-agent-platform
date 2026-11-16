@@ -203,3 +203,14 @@ type A11yTreeRequest struct {
 	MaxDepth *int   `json:"max_depth"`
 	MaxNodes *int   `json:"max_nodes"`
 }
+
+// RemoteOpenRequest is the body of POST /v1/remote/sessions: a browser's
+// WebRTC offer and who is asking for the desktop.
+type RemoteOpenRequest struct {
+	SDP         string `json:"sdp"`
+	Holder      string `json:"holder"`
+	ClientID    string `json:"client_id"`
+	FPS         int    `json:"fps"`
+	BitrateKbps int    `json:"bitrate_kbps"`
+	Display     int    `json:"display"`
+}

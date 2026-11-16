@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vm-agent 远程桌面</title>
+<style>
+  :root { color-scheme: dark; --bg: #0b0d10; --bar: #171a1f; --line: #2a2f37; --text: #e6e8eb; --dim: #9aa3ad; --accent: #4c9aff; --warn: #f0b429; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text); font: 13px/1.4 system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; overflow: hidden; }
+  #bar { position: fixed; top: 0; left: 0; right: 0; height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: var(--bar); border-bottom: 1px solid var(--line); z-index: 10; transition: transform .15s; white-space: nowrap; }
+  body.hidebar #bar { transform: translateY(-100%); }
+  body.hidebar #bar.show { transform: none; }
+  #edge { position: fixed; top: 0; left: 0; right: 0; height: 4px; z-index: 9; }
+  #host { font-weight: 600; }
+  #state { color: var(--dim); overflow: hidden; text-overflow: ellipsis; flex: 1; font-variant-numeric: tabular-nums; }
+  #state.warn { color: var(--warn); }
+  button, select { background: #232830; color: var(--text); border: 1px solid var(--line); border-radius: 5px; height: 26px; padding: 0 9px; font: inherit; cursor: pointer; }
+  button:hover, select:hover { border-color: var(--accent); }
+  #stage { position: fixed; top: 36px; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; overflow: auto; outline: none; }
+  body.hidebar #stage { top: 0; }
+  video { display: block; max-width: 100%; max-height: 100%; background: #000; user-select: none; -webkit-user-select: none; }
+  body.actual #stage { align-items: flex-start; justify-content: flex-start; }
+  body.actual video { max-width: none; max-height: none; }
+  #veil { position: fixed; inset: 36px 0 0 0; display: flex; align-items: center; justify-content: center; background: rgba(11, 13, 16, .86); z-index: 5; text-align: center; padding: 24px; }
+  #veil[hidden] { display: none; }
+  #card { max-width: 420px; }
+  #card h1 { font-size: 17px; margin: 0 0 8px; font-weight: 600; }
+  #card p { color: var(--dim); margin: 0 0 14px; }
+  #card input { width: 100%; height: 32px; margin-bottom: 10px; padding: 0 10px; border-radius: 5px; border: 1px solid var(--line); background: #11141a; color: var(--text); font: inherit; }
+  #card button { height: 32px; padding: 0 16px; background: var(--accent); border-color: var(--accent); color: #fff; }
+</style>
+</head>
+<body>
+<div id="edge"></div>
+<div id="bar">
+  <span id="host"></span>
+  <span id="state">未连接</span>
+  <select id="keys" title="发送组合键">
+    <option value="">发送按键…</option>
+    <option value="MetaLeft">Win</option>
+    <option value="ControlLeft+ShiftLeft+Escape">Ctrl+Shift+Esc（任务管理器）</option>
+    <option value="AltLeft+Tab">Alt+Tab</option>
+    <option value="AltLeft+F4">Alt+F4</option>
+    <option value="MetaLeft+KeyD">Win+D（显示桌面）</option>
+    <option value="MetaLeft+KeyE">Win+E（资源管理器）</option>
+    <option value="MetaLeft+KeyL">Win+L（锁屏）</option>
+    <option value="PrintScreen">PrintScreen</option>
+  </select>
+  <select id="quality" title="帧率与码率">
+    <option value="30,0">30 帧 · 自动码率</option>
+    <option value="60,0">60 帧 · 自动码率</option>
+    <option value="60,16000">60 帧 · 16 Mbps</option>
+    <option value="30,4000">30 帧 · 4 Mbps</option>
+    <option value="15,2000">15 帧 · 2 Mbps</option>
+  </select>
+  <button id="fit" title="适应窗口 / 原始大小">原始大小</button>
+  <button id="full" title="全屏；全屏时可捕获 Win、Alt+Tab 等系统键">全屏</button>
+  <button id="release" title="结束使用，让别人可以使用这台机器">释放</button>
+</div>
+<div id="stage" tabindex="0"><video id="video" autoplay playsinline muted></video></div>
+<div id="veil"><div id="card"></div></div>
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+const video = $('video'), stage = $('stage'), veil = $('veil'), card = $('card'), stateEl = $('state');
+const store = (s, k, v) => { try { if (v === undefined) return s.getItem(k); s.setItem(k, v); } catch (e) { return null; } };
+let clientId = store(sessionStorage, 'vmagent.client');
+if (!clientId) { clientId = Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(16).padStart(2, '0')).join(''); store(sessionStorage, 'vmagent.client', clientId); }
+const query = new URLSearchParams(location.search);
+// /remote/?name=NAME&auto connects without asking, for a bookmark.
+let holder = (query.get('name') || store(localStorage, 'vmagent.holder') || '').trim().slice(0, 32);
+let pc = null, chInput = null, chPointer = null, chControl = null;
+let session = null;          // result of POST /v1/remote/sessions
+let wanted = false;          // the user wants to be connected
+let retryTimer = 0, statsTimer = 0, status = {}, lastStats = null, cursorMsg = null;
+const down = new Set();      // KeyboardEvent.code values held on the remote side
+$('host').textContent = location.host;
+const saved = store(localStorage, 'vmagent.quality'); if (saved) $('quality').value = saved;
+
+function show(html) { card.innerHTML = html; veil.hidden = false; }
+function hide() { veil.hidden = true; }
+function setState(text, warn) { stateEl.textContent = text; stateEl.classList.toggle('warn', !!warn); }
+function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+function askName() {
+  show('<h1>远程桌面 ' + esc(location.host) + '</h1><p>同一时间只有一个人可以使用这台机器。请填写你的名字，其他人会看到是谁在使用。</p>' +
+    '<input id="name" maxlength="32" placeholder="你的名字" value="' + esc(holder) + '"><button id="go">开始使用</button>');
+  const name = $('name'); name.focus();
+  const go = () => { const v = name.value.trim(); if (!v) return; holder = v; store(localStorage, 'vmagent.holder', v); wanted = true; connect(); };
+  $('go').onclick = go; name.onkeydown = (e) => { if (e.key === 'Enter') go(); };
+}
+
+function teardown() {
+  clearInterval(statsTimer); statsTimer = 0;
+  if (pc) { pc.onconnectionstatechange = null; try { pc.close(); } catch (e) {} }
+  pc = chInput = chPointer = chControl = null; session = null; down.clear(); lastStats = null;
+}
+
+function retry(ms) { clearTimeout(retryTimer); if (wanted) retryTimer = setTimeout(connect, ms); }
+
+async function connect() {
+  clearTimeout(retryTimer); teardown();
+  if (!wanted) return;
+  setState('正在连接…');
+  const me = pc = new RTCPeerConnection();
+  pc.addTransceiver('video', { direction: 'recvonly' });
+  chInput = pc.createDataChannel('input');
+  chPointer = pc.createDataChannel('pointer', { ordered: false, maxRetransmits: 0 });
+  chControl = pc.createDataChannel('control');
+  chControl.onmessage = (e) => onControl(JSON.parse(e.data));
+  pc.ontrack = (e) => {
+    // Show frames as soon as they are decoded instead of buffering for smoothness.
+    try { e.receiver.playoutDelayHint = 0; e.receiver.jitterBufferTarget = 0; } catch (err) {}
+    video.srcObject = e.streams[0] || new MediaStream([e.track]);
+    video.play().catch(() => {});
+  };
+  pc.onconnectionstatechange = () => {
+    if (me !== pc) return;
+    if (pc.connectionState === 'connected') { hide(); stage.focus(); statsTimer = setInterval(stats, 1000); }
+    if (pc.connectionState === 'failed' || pc.connectionState === 'closed') { setState('连接已断开，正在重连…', true); retry(1000); }
+    if (pc.connectionState === 'disconnected') setState('网络中断，等待恢复…', true);
+  };
+  try {
+    await pc.setLocalDescription(await pc.createOffer());
+    await new Promise((done) => {
+      if (pc.iceGatheringState === 'complete') return done();
+      const t = setTimeout(done, 2000);
+      pc.onicegatheringstatechange = () => { if (pc.iceGatheringState === 'complete') { clearTimeout(t); done(); } };
+    });
+    if (me !== pc) return;
+    const [fps, kbps] = $('quality').value.split(',').map(Number);
+    const body = { sdp: pc.localDescription.sdp, holder, client_id: clientId, fps };
+    if (kbps) body.bitrate_kbps = kbps;
+    const res = await fetch('/v1/remote/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const reply = await res.json();
+    if (me !== pc) return;
+    if (!reply.ok) {
+      const err = reply.error || {}, d = err.details || {};
+      if (d.reason === 'remote_in_use') {
+        const since = d.since ? new Date(d.since).toLocaleTimeString() : '';
+        show('<h1>正在被使用</h1><p><b>' + esc(d.holder) + '</b> 从 ' + esc(since) + ' 起正在使用这台机器。对方释放后会自动连接。</p><button id="stop">不等了</button>');
+        $('stop').onclick = () => { wanted = false; teardown(); askName(); };
+        setState('等待 ' + d.holder + ' 释放…', true); retry(3000); return;
+      }
+      show('<h1>无法连接</h1><p>' + esc(err.message || res.status) + '</p><button id="again">重试</button>');
+      $('again').onclick = connect; setState('无法连接', true);
+      if (err.retryable) retry(5000);
+      return;
+    }
+    session = reply.result;
+    await pc.setRemoteDescription({ type: 'answer', sdp: session.sdp });
+  } catch (e) {
+    if (me !== pc) return;
+    setState('连接失败：' + e.message, true); retry(3000);
+  }
+}
+
+function onControl(m) {
+  if (m.t === 'status') { status = m; }
+  else if (m.t === 'cursor') { cursorMsg = m; applyCursor(); }
+  else if (m.t === 'error') { setState('视频不可用：' + m.message, true); }
+  else if (m.t === 'bye') {
+    const why = { idle: '长时间没有操作，使用权已自动释放。', released: '使用权已释放。', agent_shutdown: '远端服务正在重启。', video_failed: '远端无法采集画面。' }[m.reason];
+    if (m.reason === 'replaced') return;
+    if (m.reason === 'agent_shutdown' || m.reason === 'connection_lost') { setState('远端服务重启中，正在重连…', true); retry(3000); return; }
+    wanted = false; teardown();
+    show('<h1>已结束</h1><p>' + esc(why || m.reason) + '</p><button id="again">重新连接</button>');
+    $('again').onclick = () => { wanted = true; connect(); }; setState('未连接');
+  }
+}
+
+// --- geometry: where the picture is on the page, and remote pixels per CSS pixel
+function picture() {
+  const r = video.getBoundingClientRect();
+  const vw = video.videoWidth || (session && session.display.w) || 1, vh = video.videoHeight || (session && session.display.h) || 1;
+  const k = Math.min(r.width / vw, r.height / vh) || 1;
+  const w = vw * k, h = vh * k;
+  return { left: r.left + (r.width - w) / 2, top: r.top + (r.height - h) / 2, k };
+}
+function remotePoint(e) {
+  if (!session) return null;
+  const p = picture(), d = session.display;
+  const x = Math.round((e.clientX - p.left) / p.k * (d.w / (video.videoWidth || d.w)));
+  const y = Math.round((e.clientY - p.top) / p.k * (d.h / (video.videoHeight || d.h)));
+  return { x: d.x + Math.min(Math.max(x, 0), d.w - 1), y: d.y + Math.min(Math.max(y, 0), d.h - 1) };
+}
+
+// --- the remote pointer shape, drawn by this browser so it moves without video delay
+function applyCursor() {
+  const m = cursorMsg;
+  if (!m) return;
+  if (m.hidden) { video.style.cursor = 'none'; return; }
+  const img = new Image();
+  img.onload = () => {
+    if (m !== cursorMsg) return;
+    const k = picture().k * ((session && video.videoWidth) ? video.videoWidth / session.display.w : 1);
+    const dpr = window.devicePixelRatio || 1;
+    // Browsers ignore cursors larger than 128 CSS pixels.
+    const cw = Math.min(Math.max(Math.round(m.w * k), 1), 128), chh = Math.min(Math.max(Math.round(m.h * k), 1), 128);
+    const c = document.createElement('canvas'); c.width = Math.round(cw * dpr); c.height = Math.round(chh * dpr);
+    const g = c.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(img, 0, 0, c.width, c.height);
+    const hx = Math.min(Math.round(m.hx * cw / m.w), cw - 1), hy = Math.min(Math.round(m.hy * chh / m.h), chh - 1);
+    const url = c.toDataURL('image/png');
+    video.style.cursor = 'url(' + url + ') ' + hx + ' ' + hy + ', default';
+    if (dpr !== 1) video.style.cursor = 'image-set(url(' + url + ') ' + dpr + 'x) ' + hx + ' ' + hy + ', default';
+  };
+  img.src = 'data:image/png;base64,' + m.png;
+}
+new ResizeObserver(applyCursor).observe(video);
+video.addEventListener('resize', applyCursor);
+
+// --- input
+function sendInput(m) { if (chInput && chInput.readyState === 'open') chInput.send(JSON.stringify(m)); }
+let moveTo = null, moveQueued = false;
+function flushMove() {
+  moveQueued = false;
+  if (!moveTo) return;
+  const ch = chPointer && chPointer.readyState === 'open' ? chPointer : chInput;
+  if (ch && ch.readyState === 'open') ch.send(JSON.stringify({ t: 'mm', x: moveTo.x, y: moveTo.y }));
+  moveTo = null;
+}
+video.addEventListener('pointermove', (e) => {
+  const p = remotePoint(e); if (!p) return;
+  moveTo = p;
+  if (!moveQueued) { moveQueued = true; requestAnimationFrame(flushMove); }
+});
+video.addEventListener('pointerdown', (e) => {
+  const p = remotePoint(e); if (!p || e.button > 2) return;
+  e.preventDefault(); stage.focus(); video.setPointerCapture(e.pointerId);
+  moveTo = null; sendInput({ t: 'md', b: e.button, x: p.x, y: p.y });
+});
+video.addEventListener('pointerup', (e) => {
+  const p = remotePoint(e); if (!p || e.button > 2) return;
+  e.preventDefault(); moveTo = null; sendInput({ t: 'mu', b: e.button, x: p.x, y: p.y });
+});
+video.addEventListener('contextmenu', (e) => e.preventDefault());
+video.addEventListener('dragstart', (e) => e.preventDefault());
+video.addEventListener('wheel', (e) => {
+  if (!session) return;
+  e.preventDefault();
+  const unit = e.deltaMode === 1 ? 100 / 3 : e.deltaMode === 2 ? 400 : 1;   // lines, pages, pixels
+  sendInput({ t: 'mw', dx: e.deltaX * unit, dy: e.deltaY * unit });
+}, { passive: false });
+
+function keyDown(code) { down.add(code); sendInput({ t: 'kd', c: code }); }
+function keyUp(code) { down.delete(code); sendInput({ t: 'ku', c: code }); }
+function releaseAll() { if (down.size || session) sendInput({ t: 'rel' }); down.clear(); }
+stage.addEventListener('keydown', (e) => {
+  if (!session || !e.code) return;
+  e.preventDefault(); e.stopPropagation(); keyDown(e.code);
+});
+stage.addEventListener('keyup', (e) => {
+  if (!session || !e.code) return;
+  e.preventDefault(); e.stopPropagation(); keyUp(e.code);
+});
+// A key released while the page is not looking would stay down on the remote side.
+window.addEventListener('blur', releaseAll);
+document.addEventListener('visibilitychange', () => { if (document.hidden) releaseAll(); });
+
+$('keys').onchange = (e) => {
+  const codes = e.target.value ? e.target.value.split('+') : []; e.target.value = '';
+  codes.forEach((c) => sendInput({ t: 'kd', c }));
+  codes.slice().reverse().forEach((c) => sendInput({ t: 'ku', c }));
+  stage.focus();
+};
+$('quality').onchange = (e) => { store(localStorage, 'vmagent.quality', e.target.value); if (wanted) connect(); };
+$('fit').onclick = () => { const actual = document.body.classList.toggle('actual'); $('fit').textContent = actual ? '适应窗口' : '原始大小'; applyCursor(); stage.focus(); };
+$('full').onclick = async () => {
+  if (document.fullscreenElement) { await document.exitFullscreen(); return; }
+  await document.documentElement.requestFullscreen();
+  // Lets the page receive Win, Alt+Tab, Esc and the like; needs a secure origin.
+  if (navigator.keyboard && navigator.keyboard.lock) navigator.keyboard.lock().catch(() => {});
+  stage.focus();
+};
+document.addEventListener('fullscreenchange', () => {
+  document.body.classList.toggle('hidebar', !!document.fullscreenElement);
+  if (!document.fullscreenElement && navigator.keyboard && navigator.keyboard.unlock) navigator.keyboard.unlock();
+  setTimeout(applyCursor, 50);
+});
+$('edge').addEventListener('pointerenter', () => $('bar').classList.add('show'));
+$('bar').addEventListener('pointerleave', () => $('bar').classList.remove('show'));
+
+function release(keepalive) {
+  const id = session && session.session_id;
+  wanted = false; clearTimeout(retryTimer);
+  if (id) fetch('/v1/remote/sessions/' + id, { method: 'DELETE', keepalive: !!keepalive }).catch(() => {});
+  teardown();
+}
+$('release').onclick = () => { release(); setState('未连接'); show('<h1>已释放</h1><p>这台机器现在可以被其他人使用。</p><button id="again">重新连接</button>'); $('again').onclick = () => { wanted = true; connect(); }; };
+window.addEventListener('pagehide', () => { if (session) release(true); });
+
+// --- statistics, shown in the bar and reported to the agent
+async function stats() {
+  if (!pc || !session) return;
+  const report = await pc.getStats(); let v = null, rtt = null;
+  report.forEach((s) => {
+    if (s.type === 'inbound-rtp' && s.kind === 'video') v = s;
+    if (s.type === 'candidate-pair' && s.nominated && s.currentRoundTripTime !== undefined) rtt = s.currentRoundTripTime;
+  });
+  if (!v) return;
+  const now = performance.now(), prev = lastStats;
+  lastStats = { t: now, bytes: v.bytesReceived, emitted: v.jitterBufferEmittedCount, delay: v.jitterBufferDelay };
+  if (!prev) return;
+  const dt = (now - prev.t) / 1000, emitted = v.jitterBufferEmittedCount - prev.emitted;
+  const s = { fps: v.framesPerSecond || 0, kbps: Math.round((v.bytesReceived - prev.bytes) * 8 / dt / 1000), width: v.frameWidth, height: v.frameHeight,
+    decoded: v.framesDecoded, dropped: v.framesDropped, lost: v.packetsLost, decoder: v.decoderImplementation || '',
+    buffer_ms: emitted > 0 ? Math.round((v.jitterBufferDelay - prev.delay) / emitted * 1000) : 0, rtt_ms: rtt === null ? null : Math.round(rtt * 1000) };
+  const capture = { dda: '桌面复制', gdi: 'GDI（无活动显示器，约 16 帧）' }[status.capture] || status.capture || '';
+  setState(holder + ' · ' + (s.width || '?') + '×' + (s.height || '?') + ' · ' + Math.round(s.fps) + ' 帧 · ' + (s.kbps / 1000).toFixed(1) + ' Mbps' +
+    (s.rtt_ms === null ? '' : ' · 往返 ' + s.rtt_ms + ' ms') + ' · 缓冲 ' + s.buffer_ms + ' ms' + (capture ? ' · ' + capture : '') + (status.encoder ? ' / ' + status.encoder : ''),
+    status.capture === 'gdi');
+  if (chControl && chControl.readyState === 'open') chControl.send(JSON.stringify({ t: 'stats', stats: s }));
+}
+
+askName();
+if (holder && query.has('auto')) { wanted = true; connect(); }
+</script>
+</body>
+</html>

@@ -647,6 +647,63 @@ type RecordListResult struct {
 	Sessions []RecordSession `json:"sessions"`
 }
 
+// RemoteOpenRequest is the RemoteOpenRequest schema.
+type RemoteOpenRequest struct {
+	// The browser's WebRTC offer with its ICE candidates gathered.
+	Sdp string `json:"sdp"`
+	// Name of the person
+	Holder string `json:"holder"`
+	// Identifies the page so that its reconnect replaces its own session.
+	ClientID *string `json:"client_id,omitempty"`
+	// Default 30.
+	Fps *int `json:"fps,omitempty"`
+	// Default scales with the display
+	BitrateKbps *int `json:"bitrate_kbps,omitempty"`
+	// Only 0
+	Display *int `json:"display,omitempty"`
+}
+
+// RemoteOpenResult is the RemoteOpenResult schema.
+type RemoteOpenResult struct {
+	SessionID string `json:"session_id"`
+	// The WebRTC answer.
+	Sdp         string  `json:"sdp"`
+	Display     Rect    `json:"display"`
+	Scale       float64 `json:"scale"`
+	Fps         int     `json:"fps"`
+	BitrateKbps int     `json:"bitrate_kbps"`
+	// The session ends after this long without input; 0 never.
+	IdleReleaseMS int64 `json:"idle_release_ms"`
+}
+
+// RemoteSession is the RemoteSession schema.
+type RemoteSession struct {
+	SessionID string `json:"session_id"`
+	Holder    string `json:"holder"`
+	// Address the session was opened from.
+	Remote string `json:"remote"`
+	// One of: connecting, connected.
+	State       string     `json:"state"`
+	StartedAt   time.Time  `json:"started_at"`
+	LastInputAt *time.Time `json:"last_input_at"`
+	Fps         int        `json:"fps"`
+	BitrateKbps int        `json:"bitrate_kbps"`
+	// dda (Desktop Duplication) or gdi; empty until video starts. gdi is used while no display is active, such as a closed laptop lid, and is limited to about 16 frames a second.
+	Capture     string `json:"capture"`
+	Encoder     string `json:"encoder"`
+	PacketsSent int64  `json:"packets_sent"`
+	FramesSent  int64  `json:"frames_sent"`
+	KeyEvents   int64  `json:"key_events"`
+	MouseEvents int64  `json:"mouse_events"`
+	// What the page last reported about its decoder.
+	Client map[string]any `json:"client,omitempty"`
+}
+
+// RemoteListResult is the RemoteListResult schema.
+type RemoteListResult struct {
+	Sessions []RemoteSession `json:"sessions"`
+}
+
 // RecordUploadRequest is the RecordUploadRequest schema.
 type RecordUploadRequest struct {
 	// Object key relative to the configured prefix; default <session_id>.mp4.
@@ -762,6 +819,10 @@ var Operations = []Operation{
 	{ID: "recordDelete", Method: "DELETE", Path: "/v1/record/{session_id}"},
 	{ID: "recordUpload", Method: "POST", Path: "/v1/record/{session_id}/upload"},
 	{ID: "a11yTree", Method: "POST", Path: "/v1/a11y/tree"},
+	{ID: "remotePage", Method: "GET", Path: "/remote/"},
+	{ID: "remoteOpen", Method: "POST", Path: "/v1/remote/sessions"},
+	{ID: "remoteList", Method: "GET", Path: "/v1/remote/sessions"},
+	{ID: "remoteClose", Method: "DELETE", Path: "/v1/remote/sessions/{session_id}"},
 }
 
 // Probe calls GET /v1/probe: Service and desktop session health.
@@ -1347,6 +1408,50 @@ func (c *Client) A11yTree(ctx context.Context, body *A11yTreeRequest, opts ...Op
 		return nil, err
 	}
 	return &out, nil
+}
+
+// RemotePage calls GET /remote/: The web remote desktop page.
+//
+// The viewer for a browser (docs/remote-desktop-design.md). It opens a
+// session with POST /v1/remote/sessions and then exchanges video and
+// input over WebRTC on the UDP port given by -remote-udp-port.
+// unsupported unless vm-agent runs with -remote and ffmpeg is available.
+func (c *Client) RemotePage(ctx context.Context, opts ...Option) (*StreamResponse, error) {
+	return c.doStream(ctx, "GET", "/remote/", nil, nil, opts)
+}
+
+// RemoteOpen calls POST /v1/remote/sessions: Take the desktop for a browser session.
+//
+// Answers a browser's WebRTC offer, which must offer to receive H.264
+// video and may open the data channels input (reliable), pointer
+// (unreliable, pointer moves) and control. The session is the lease on
+// the desktop: one person at a time. While it is held, another caller
+// gets conflict with details.reason=remote_in_use, holder and since, and
+// so does every input/* request. A request carrying the client_id of
+// the current session replaces that session (a page reconnecting).
+// The session ends when the page releases it, the connection is lost
+// for 30 seconds, no input arrives for -remote-idle-release, or it is
+// deleted. Keys and buttons still held are then released.
+func (c *Client) RemoteOpen(ctx context.Context, body *RemoteOpenRequest, opts ...Option) (*RemoteOpenResult, error) {
+	var out RemoteOpenResult
+	if err := c.do(ctx, "POST", "/v1/remote/sessions", nil, body, &out, opts); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// RemoteList calls GET /v1/remote/sessions: The current remote session, if any.
+func (c *Client) RemoteList(ctx context.Context, opts ...Option) (*RemoteListResult, error) {
+	var out RemoteListResult
+	if err := c.do(ctx, "GET", "/v1/remote/sessions", nil, nil, &out, opts); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// RemoteClose calls DELETE /v1/remote/sessions/{session_id}: End a remote session and release the desktop.
+func (c *Client) RemoteClose(ctx context.Context, sessionID string, opts ...Option) error {
+	return c.do(ctx, "DELETE", strings.ReplaceAll("/v1/remote/sessions/{session_id}", "{session_id}", url.PathEscape(sessionID)), nil, nil, nil, opts)
 }
 
 // ExecResponse holds whichever of ExecResult or ExecDetachedResult the response carries.
