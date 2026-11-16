@@ -4,7 +4,7 @@
 // desktop, opens /remote/ in headless Chrome, clicks through the page and
 // times how long the picture takes to change. Needs Node 22 or newer.
 //
-//   node test/remotelatency/latency.mjs --agent http://192.168.1.2:7070 \
+//   node test/remotelatency/latency.mjs --agent http://HOST:7070 \
 //        --winapp 'C:\path\winapp.exe' [--samples 40] [--quality 60,0]
 //
 // Times are milliseconds from sending the click:

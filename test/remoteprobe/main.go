@@ -2,7 +2,7 @@
 // the page does and reports what arrives: frame rate, bitrate, keyframes and
 // the capture pipeline. It is used to verify a deployment without a browser.
 //
-//	go run ./test/remoteprobe -agent http://192.168.1.2:7070 -seconds 10
+//	go run ./test/remoteprobe -agent http://HOST:7070 -seconds 10
 package main
 
 import (

@@ -62,5 +62,11 @@ Recording uploads (optional): add `-upload-s3-endpoint host:port
 arguments; key files are reread on every upload, so they can be rotated in
 place.
 
+Web remote desktop (optional, Windows only): add `-remote` to the agent
+arguments and open `http://HOST:7070/remote/` in Chrome or Edge. It needs
+ffmpeg and inbound UDP port 7071 (`-remote-udp-port`); the firewall rule must
+allow UDP for the vm-agent.exe of the release in use. See
+`docs/remote-desktop-design.md`.
+
 Authentication and TLS are not implemented (spec D9): bind `-listen` to the
 platform-facing interface and restrict the port at the network layer.
