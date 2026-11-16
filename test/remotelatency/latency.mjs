@@ -79,6 +79,10 @@ try {
     const temp = (await api('GET', '/v1/file/known_dirs')).temp;
     appPid = (await api('POST', '/v1/process/launch', { argv: [args.winapp, '-flash', '-log', temp.replace(/\\$/, '') + '\\winapp-latency.log'] })).pid;
     await sleep(1500);
+    // The clicks go to the middle of the screen: never send them unless the
+    // test window is what will receive them (an open Start menu covers it).
+    const active = (await api('GET', '/v1/window/active').catch(() => null))?.title;
+    if (active !== 'vm-agent-dpi-test') throw new Error(`the test window is not in front (active window: ${active ?? 'none'}); nothing was clicked`);
   }
   profile = mkdtempSync(join(tmpdir(), 'vmagent-latency-'));
   const port = 9300 + Math.floor(Math.random() * 500);
