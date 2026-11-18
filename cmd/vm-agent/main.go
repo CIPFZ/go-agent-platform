@@ -20,6 +20,7 @@ import (
 	"github.com/CIPFZ/go-agent-platform/internal/audit"
 	"github.com/CIPFZ/go-agent-platform/internal/config"
 	"github.com/CIPFZ/go-agent-platform/internal/dedup"
+	"github.com/CIPFZ/go-agent-platform/internal/securedesk"
 	"github.com/CIPFZ/go-agent-platform/internal/server"
 	"github.com/CIPFZ/go-agent-platform/internal/version"
 )
@@ -33,6 +34,14 @@ func main() {
 	cfg, err := config.Parse(os.Args[1:], os.Stderr)
 	if err != nil {
 		os.Exit(2)
+	}
+	// The secure desktop service and helper share the executable but none
+	// of the agent's state.
+	if cfg.DesktopService {
+		os.Exit(securedesk.RunService(cfg.FFmpeg))
+	}
+	if cfg.DesktopHelper {
+		os.Exit(securedesk.RunHelper(cfg.FFmpeg))
 	}
 	if cfg.Supervise {
 		os.Exit(supervise(cfg, os.Args[1:]))

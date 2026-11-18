@@ -73,6 +73,8 @@ type Options struct {
 	Source Source
 	// Audio overrides the capture of the desktop's sound (tests).
 	Audio AudioSource
+	// Secure shows and operates the lock screen; nil cannot.
+	Secure SecureDesktop
 	// VirtualDisplay adds a monitor while no display is active; nil never
 	// does.
 	VirtualDisplay VirtualDisplay
@@ -242,6 +244,9 @@ type Info struct {
 	// Client is what the viewer last reported about its decoder.
 	Client map[string]any `json:"client,omitempty"`
 }
+
+// SecureAvailable reports whether the lock screen can be shown and operated.
+func (m *Manager) SecureAvailable() bool { return m.o.Secure != nil && m.o.Secure.Available() }
 
 // InUse returns the error given to anyone else while the desktop is taken,
 // or nil when it is free.

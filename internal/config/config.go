@@ -45,6 +45,10 @@ type Config struct {
 	Remote            bool
 	RemoteUDPPort     int
 	RemoteIdleRelease time.Duration
+
+	// The secure desktop service and its helper (internal/securedesk).
+	DesktopService bool
+	DesktopHelper  bool
 }
 
 // DefaultBaseDir is the per-user state root used by the defaults: the user
@@ -86,6 +90,8 @@ func Parse(args []string, output io.Writer) (*Config, error) {
 	fs.BoolVar(&cfg.Remote, "remote", false, "enable the web remote desktop at /remote/")
 	fs.IntVar(&cfg.RemoteUDPPort, "remote-udp-port", 7071, "UDP port carrying the remote desktop's video and input")
 	fs.DurationVar(&cfg.RemoteIdleRelease, "remote-idle-release", 10*time.Minute, "release the remote desktop after this long without input, 0 never")
+	fs.BoolVar(&cfg.DesktopService, "desktop-service", false, "run as the Windows service that gives the remote desktop the lock screen")
+	fs.BoolVar(&cfg.DesktopHelper, "desktop-helper", false, "run as the secure desktop helper (started by -desktop-service)")
 	if err := fs.Parse(args); err != nil {
 		return nil, err
 	}

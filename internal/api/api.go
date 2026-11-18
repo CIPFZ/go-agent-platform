@@ -30,6 +30,7 @@ import (
 	"github.com/CIPFZ/go-agent-platform/internal/config"
 	"github.com/CIPFZ/go-agent-platform/internal/policy"
 	"github.com/CIPFZ/go-agent-platform/internal/protocol"
+	"github.com/CIPFZ/go-agent-platform/internal/securedesk"
 	"github.com/CIPFZ/go-agent-platform/internal/server"
 	"github.com/CIPFZ/go-agent-platform/internal/supervisor"
 	"github.com/CIPFZ/go-agent-platform/internal/upload"
@@ -63,6 +64,9 @@ type Deps struct {
 	// RemoteVirtualDisplay adds a monitor for the remote desktop while no
 	// display is active; nil never does.
 	RemoteVirtualDisplay remote.VirtualDisplay
+	// RemoteSecure shows and operates the lock screen through the secure
+	// desktop helper; nil cannot.
+	RemoteSecure remote.SecureDesktop
 	// RecordGrabArgs overrides ffmpeg's input arguments (tests).
 	RecordGrabArgs func(fps int, r protocol.Rect) ([]string, error)
 	Session        func() session.State
@@ -146,6 +150,7 @@ func New(cfg *config.Config, sink audit.Sink) (*API, error) {
 		Uploader:             uploader,
 		Wayland:              session.Wayland(),
 		RemoteVirtualDisplay: remote.PlatformVirtualDisplay(),
+		RemoteSecure:         securedesk.NewClient(),
 		Config:               cfg,
 		Audit:                sink,
 		Screen:               screen.NewBackend(),

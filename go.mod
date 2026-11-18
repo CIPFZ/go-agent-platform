@@ -3,6 +3,7 @@ module github.com/CIPFZ/go-agent-platform
 go 1.26.0
 
 require (
+	github.com/Microsoft/go-winio v0.6.2
 	github.com/godbus/dbus/v5 v5.2.4
 	github.com/jezek/xgb v1.3.1
 	github.com/kbinani/screenshot v0.0.0-20250624051815-089614a94018

@@ -172,7 +172,8 @@ function onControl(m) {
   else if (m.t === 'error') { setState('视频不可用：' + m.message, true); }
   else if (m.t === 'clip') { if (m.large) fetchClip(); else gotClip(m.text); }
   else if (m.t === 'desk') {
-    if (m.locked) show('<h1>远端已锁屏</h1><p>锁屏界面目前无法显示和操作，需要在那台电脑上解锁。解锁后画面会自动恢复。</p>');
+    // With the secure desktop service the lock screen is shown and can be unlocked from here.
+    if (m.locked && !m.operable) show('<h1>远端已锁屏</h1><p>这台电脑没有安装锁屏支持服务，锁屏界面无法显示和操作，需要在那台电脑上解锁。解锁后画面会自动恢复。</p>');
     else hide();
   }
   else if (m.t === 'bye') {
@@ -406,7 +407,7 @@ async function stats() {
     decoded: v.framesDecoded, dropped: v.framesDropped, lost: v.packetsLost, decoder: v.decoderImplementation || '',
     buffer_ms: emitted > 0 ? Math.round((v.jitterBufferDelay - prev.delay) / emitted * 1000) : 0, rtt_ms: rtt === null ? null : Math.round(rtt * 1000),
     audio_packets: au ? au.packetsReceived : 0, audio_level: au && au.audioLevel !== undefined ? Math.round(au.audioLevel * 1000) / 1000 : null };
-  const capture = { dda: '桌面复制', gdi: 'GDI（无活动显示器，约 16 帧）' }[status.capture] || status.capture || '';
+  const capture = { dda: '桌面复制', gdi: 'GDI（无活动显示器，约 16 帧）', lock: '锁屏界面' }[status.capture] || status.capture || '';
   setState(holder + ' · ' + (s.width || '?') + '×' + (s.height || '?') + ' · ' + Math.round(s.fps) + ' 帧 · ' + (s.kbps / 1000).toFixed(1) + ' Mbps' +
     (s.rtt_ms === null ? '' : ' · 往返 ' + s.rtt_ms + ' ms') + ' · 缓冲 ' + s.buffer_ms + ' ms' + (capture ? ' · ' + capture : '') + (status.encoder ? ' / ' + status.encoder : ''),
     status.capture === 'gdi');

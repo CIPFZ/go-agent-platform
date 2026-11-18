@@ -56,7 +56,13 @@ if ($Reconfigure -or -not (Test-Path -LiteralPath $script:ArgsFile)) {
 # The running agent holds its executable open; stop it before replacing a
 # release in place or switching the junction.
 Stop-Agent -TaskName $TaskName
-Copy-Item -LiteralPath $Binary -Destination (Join-Path $release 'vm-agent.exe') -Force
+# Windows can keep the executable of a process that has just ended locked
+# for a moment; a copy made too early fails with "in use".
+$target = Join-Path $release 'vm-agent.exe'
+for ($attempt = 1; ; $attempt++) {
+    try { Copy-Item -LiteralPath $Binary -Destination $target -Force; break }
+    catch { if ($attempt -ge 20) { throw }; Start-Sleep -Milliseconds 500 }
+}
 
 $old = Get-JunctionTarget $script:Current
 if ($old -and ($old.TrimEnd('\') -ne $release.TrimEnd('\'))) { Set-Junction $script:Previous $old }

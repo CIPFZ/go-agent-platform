@@ -37,6 +37,7 @@ func (a *API) newRemote(d Deps) *remote.Manager {
 		Screen:         a.screen,
 		Clipboard:      a.clipboard,
 		VirtualDisplay: d.RemoteVirtualDisplay,
+		Secure:         d.RemoteSecure,
 		StateDir:       filepath.Dir(d.Config.JobDir),
 		Desktop:        func() remote.Desktop { return remote.Desktop{Locked: a.session().Locked} },
 		Source:         d.RemoteSource,
@@ -84,7 +85,8 @@ func (a *API) remoteOpen(c *server.Call) (any, error) {
 	if err := a.remoteEnabled(); err != nil {
 		return nil, err
 	}
-	if err := a.requireDisplay(); err != nil {
+	// A locked desktop can be opened when the helper is there to show it.
+	if err := a.requireDisplay(); err != nil && !(a.session().Locked && a.remote.SecureAvailable()) {
 		return nil, err
 	}
 	res, err := a.remote.Open(ctx, remote.OpenRequest{SDP: req.SDP, Holder: req.Holder, ClientID: req.ClientID, FPS: req.FPS,

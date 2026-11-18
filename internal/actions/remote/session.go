@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"hash/fnv"
 	"image/png"
+	"net"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -136,31 +138,134 @@ func (s *session) onConnectionState(state webrtc.PeerConnectionState) {
 
 func (s *session) locked() bool { return s.m.o.Desktop != nil && s.m.o.Desktop().Locked }
 
+// secure reports whether the desktop is locked and the helper can show and
+// operate it.
+func (s *session) secure() bool {
+	return s.locked() && s.m.o.Secure != nil && s.m.o.Secure.Available()
+}
+
+// Video sources of a session.
+const (
+	modeDesktop = iota // the user's desktop, captured by this process
+	modeSecure         // the lock screen, captured by the helper
+	modeWait           // locked and no helper: nothing to show
+)
+
+func (s *session) mode() int {
+	switch {
+	case !s.locked():
+		return modeDesktop
+	case s.secure():
+		return modeSecure
+	}
+	return modeWait
+}
+
+// video runs the source that fits the desktop's state and changes over when
+// the desktop is locked or unlocked.
 func (s *session) video() {
+	secureFailures := 0
 	for s.ctx.Err() == nil {
-		err := s.m.src.Run(s.ctx, s.params, s.emit, func(st Status) {
-			s.mu.Lock()
-			s.status = st
-			s.mu.Unlock()
-			s.send(map[string]any{"t": "status", "capture": st.Capture, "encoder": st.Encoder})
-		})
-		if err == nil || s.ctx.Err() != nil {
-			return
+		mode := s.mode()
+		ctx, cancel := context.WithCancel(s.ctx)
+		go func() {
+			t := time.NewTicker(500 * time.Millisecond)
+			defer t.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-t.C:
+					if s.mode() != mode {
+						cancel()
+						return
+					}
+				}
+			}
+		}()
+		var err error
+		switch mode {
+		case modeDesktop:
+			err = s.m.src.Run(ctx, s.params, s.emit, s.setStatus)
+		case modeSecure:
+			err = s.secureVideo(ctx)
+		case modeWait:
+			<-ctx.Done()
 		}
-		// A locked desktop cannot be captured from this process. The session
-		// is kept and the video resumes when the desktop is unlocked.
-		if !s.locked() {
+		changed := ctx.Err() != nil
+		cancel()
+		switch {
+		case s.ctx.Err() != nil:
+			return
+		case changed || err == nil:
+			secureFailures = 0
+		case mode == modeSecure:
+			// The lock screen may not be capturable for a moment while the
+			// desktop switches; keep trying, slowly.
+			if secureFailures++; secureFailures <= 3 {
+				logf("session %s: lock screen video: %v", s.id, err)
+			}
+			select {
+			case <-s.ctx.Done():
+			case <-time.After(2 * time.Second):
+			}
+		case s.mode() == modeDesktop:
 			logf("session %s: %v", s.id, err)
 			s.send(map[string]any{"t": "error", "message": err.Error()})
 			s.close("video_failed")
 			return
 		}
-		for s.locked() {
-			select {
-			case <-s.ctx.Done():
-				return
-			case <-time.After(time.Second):
+	}
+}
+
+func (s *session) setStatus(st Status) {
+	s.mu.Lock()
+	s.status = st
+	s.mu.Unlock()
+	s.send(map[string]any{"t": "status", "capture": st.Capture, "encoder": st.Encoder})
+}
+
+// secureVideo has the helper capture the lock screen and forwards the RTP
+// it sends to a loopback port.
+func (s *session) secureVideo(ctx context.Context) error {
+	conn, rtcpConn, err := listenRTP()
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	defer rtcpConn.Close()
+	_ = conn.SetReadBuffer(4 << 20)
+	ended := make(chan error, 1)
+	go func() {
+		ended <- s.m.o.Secure.Video(ctx, SecureVideo{FPS: s.params.FPS, BitrateKbps: s.params.BitrateKbps,
+			Port: conn.LocalAddr().(*net.UDPAddr).Port, W: s.params.Display.W, H: s.params.Display.H})
+	}()
+	started, first := time.Now(), false
+	buf := make([]byte, 2048)
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case err := <-ended:
+			if err == nil {
+				err = errors.New("the helper stopped the capture")
 			}
+			return err
+		default:
+		}
+		_ = conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+		n, rerr := conn.Read(buf)
+		if rerr == nil && n > 12 {
+			pkt := &rtp.Packet{}
+			if pkt.Unmarshal(append([]byte(nil), buf[:n]...)) == nil {
+				if !first {
+					first = true
+					s.setStatus(Status{Capture: "lock", Encoder: "libx264"})
+				}
+				s.emit(pkt)
+			}
+		} else if !first && time.Since(started) > firstPacketTimeout {
+			return errors.New("the helper sent no video")
 		}
 	}
 }
@@ -344,6 +449,10 @@ func (s *session) point(x, y int) input.Point {
 }
 
 func (s *session) apply(msg message) {
+	if s.secure() {
+		s.applySecure(msg)
+		return
+	}
 	ctx, cancel := context.WithTimeout(s.ctx, 3*time.Second)
 	defer cancel()
 	keyboard := false
@@ -405,6 +514,10 @@ func (s *session) apply(msg message) {
 		}
 		return
 	}
+	s.applied(keyboard)
+}
+
+func (s *session) applied(keyboard bool) {
 	if keyboard {
 		s.keyEvents.Add(1)
 	} else {
@@ -416,6 +529,24 @@ func (s *session) apply(msg message) {
 	if s.m.o.OnInput != nil {
 		s.m.o.OnInput()
 	}
+}
+
+// applySecure sends one event to the helper, which applies it on the lock
+// screen. Positions are clamped here; the helper trusts them.
+func (s *session) applySecure(msg message) {
+	if msg.X != nil && msg.Y != nil {
+		p := s.point(*msg.X, *msg.Y)
+		msg.X, msg.Y = &p.X, &p.Y
+	}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return
+	}
+	if err := s.m.o.Secure.Input(data); err != nil {
+		logf("session %s: lock screen input: %v", s.id, err)
+		return
+	}
+	s.applied(msg.T == "kd" || msg.T == "ku" || msg.T == "tx")
 }
 
 // wheel scrolls by the browser's pixel deltas (positive dy scrolls down,
@@ -561,7 +692,7 @@ func (s *session) clipboard() {
 func (s *session) watch() {
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
-	wasLocked := false
+	wasLocked, wasOperable := false, false
 	embedded, embeddedSent := false, false
 	for {
 		select {
@@ -569,14 +700,17 @@ func (s *session) watch() {
 			return
 		case <-t.C:
 		}
-		if locked := s.locked(); locked != wasLocked {
-			wasLocked = locked
-			s.send(map[string]any{"t": "desk", "locked": locked})
+		// operable: the helper shows the lock screen, so it can be unlocked
+		// from the page.
+		if locked, operable := s.locked(), s.secure(); locked != wasLocked || operable != wasOperable {
+			wasLocked, wasOperable = locked, operable
+			s.send(map[string]any{"t": "desk", "locked": locked, "operable": operable})
 		}
 		s.m.tendDisplay(s.vsize, s.scale)
 		// Told once the page listens, and again whenever it changes (the
 		// lid is opened or closed).
-		if e := s.m.cursorEmbedded(); s.listening() && (!embeddedSent || e != embedded) {
+		// The lock screen's video also carries the pointer.
+		if e := s.m.cursorEmbedded() || s.secure(); s.listening() && (!embeddedSent || e != embedded) {
 			embedded, embeddedSent = e, true
 			s.send(map[string]any{"t": "pointer", "embedded": e})
 		}

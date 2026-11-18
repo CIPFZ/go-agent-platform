@@ -51,3 +51,29 @@ func ClientProtocolType() (uint16, error) {
 	}
 	return *buf, nil
 }
+
+var procSetThreadDesktop = user32.NewProc("SetThreadDesktop")
+
+// attachedDesktop is the desktop handle the input thread holds.
+var attachedDesktop uintptr
+
+// AttachInputDesktop makes the calling thread belong to the desktop that is
+// receiving input, which SendInput requires. It is for one dedicated OS
+// thread (runtime.LockOSThread) of a process allowed to open that desktop:
+// on the lock screen that means SYSTEM.
+func AttachInputDesktop() error {
+	const genericAll = 0x10000000
+	desk, err := Call(procOpenInputDesktop, 0, 0, genericAll)
+	if desk == 0 {
+		return lastErr(err)
+	}
+	if r, err := Call(procSetThreadDesktop, desk); r == 0 {
+		_, _ = Call(procCloseDesktop, desk)
+		return lastErr(err)
+	}
+	if attachedDesktop != 0 {
+		_, _ = Call(procCloseDesktop, attachedDesktop)
+	}
+	attachedDesktop = desk
+	return nil
+}
