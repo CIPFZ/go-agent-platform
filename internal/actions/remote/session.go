@@ -232,6 +232,13 @@ func (s *session) onDataChannel(dc *webrtc.DataChannel) {
 	}
 }
 
+// listening reports whether the page's control channel is open.
+func (s *session) listening() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.control != nil
+}
+
 func (s *session) send(v any) {
 	s.mu.Lock()
 	dc := s.control
@@ -555,6 +562,7 @@ func (s *session) watch() {
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
 	wasLocked := false
+	embedded, embeddedSent := false, false
 	for {
 		select {
 		case <-s.ctx.Done():
@@ -566,6 +574,12 @@ func (s *session) watch() {
 			s.send(map[string]any{"t": "desk", "locked": locked})
 		}
 		s.m.tendDisplay(s.vsize, s.scale)
+		// Told once the page listens, and again whenever it changes (the
+		// lid is opened or closed).
+		if e := s.m.cursorEmbedded(); s.listening() && (!embeddedSent || e != embedded) {
+			embedded, embeddedSent = e, true
+			s.send(map[string]any{"t": "pointer", "embedded": e})
+		}
 		now := s.m.o.Now()
 		s.mu.Lock()
 		state, idle := s.state, now.Sub(s.lastInput)

@@ -139,6 +139,14 @@ func (m *Manager) virtualGeometry(d screen.Display) (protocol.Rect, float64) {
 	return d.Bounds, d.Scale
 }
 
+// cursorEmbedded reports whether the pointer is part of the captured
+// picture. The virtual monitor has no hardware cursor, so Windows draws the
+// pointer into its image; the page must then not draw one of its own.
+func (m *Manager) cursorEmbedded() bool {
+	vd := m.o.VirtualDisplay
+	return vd != nil && vd.Plugged() > 0 && !vd.RealDisplay()
+}
+
 // reclaimDisplay removes virtual monitors left connected by a run that ended
 // without closing its session. Whether one is left is recorded in a marker
 // file, so a monitor the user added on purpose is not touched.

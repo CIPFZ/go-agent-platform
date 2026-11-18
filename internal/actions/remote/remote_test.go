@@ -535,6 +535,20 @@ func TestVirtualDisplayFollowsTheSession(t *testing.T) {
 	}
 
 	// No display is active: the session brings its own, sized like the desktop.
+	pv := newViewer(t)
+	pres, err := m.Open(context.Background(), OpenRequest{SDP: pv.offer, Holder: "alice", ClientID: "tab-0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pv.answer(pres.SDP)
+	// The virtual monitor carries the pointer in its picture; the page is told.
+	if msg := pv.message("pointer"); msg["embedded"] != true {
+		t.Fatalf("pointer = %v", msg)
+	}
+	if err := m.Close(pres.SessionID); err != nil {
+		t.Fatal(err)
+	}
+	vd.plugs = nil
 	first := open("tab-1")
 	if vd.Plugged() != 1 || len(vd.plugs) != 1 || vd.plugs[0] != "1920x1080@1.00" || !markerExists(dir) {
 		t.Fatalf("after open: plugged %d %v marker %v", vd.Plugged(), vd.plugs, markerExists(dir))

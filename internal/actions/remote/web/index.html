@@ -168,6 +168,7 @@ async function connect() {
 function onControl(m) {
   if (m.t === 'status') { status = m; }
   else if (m.t === 'cursor') { cursorMsg = m; applyCursor(); }
+  else if (m.t === 'pointer') { pointerEmbedded = !!m.embedded; applyCursor(); }
   else if (m.t === 'error') { setState('视频不可用：' + m.message, true); }
   else if (m.t === 'clip') { if (m.large) fetchClip(); else gotClip(m.text); }
   else if (m.t === 'desk') {
@@ -201,13 +202,17 @@ function remotePoint(e) {
 }
 
 // --- the remote pointer shape, drawn by this browser so it moves without video delay
+// With a virtual monitor (a closed lid) Windows draws the pointer into the
+// picture itself; a second one drawn here would trail beside it.
+let pointerEmbedded = false;
 function applyCursor() {
+  if (pointerEmbedded) { video.style.cursor = 'none'; return; }
   const m = cursorMsg;
   if (!m) return;
   if (m.hidden) { video.style.cursor = 'none'; return; }
   const img = new Image();
   img.onload = () => {
-    if (m !== cursorMsg) return;
+    if (m !== cursorMsg || pointerEmbedded) return;
     const k = picture().k * ((session && video.videoWidth) ? video.videoWidth / session.display.w : 1);
     const dpr = window.devicePixelRatio || 1;
     // Browsers ignore cursors larger than 128 CSS pixels.
