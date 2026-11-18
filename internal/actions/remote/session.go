@@ -16,6 +16,7 @@ import (
 	"github.com/pion/webrtc/v4"
 
 	"github.com/CIPFZ/go-agent-platform/internal/actions/input"
+	"github.com/CIPFZ/go-agent-platform/internal/protocol"
 )
 
 // Wire limits of the data channels.
@@ -50,6 +51,9 @@ type session struct {
 	remote   string
 	started  time.Time
 	params   Params
+	// vsize and scale are what a virtual monitor is given.
+	vsize protocol.Rect
+	scale float64
 
 	pc    *webrtc.PeerConnection
 	track *webrtc.TrackLocalStaticRTP
@@ -226,6 +230,13 @@ func (s *session) onDataChannel(dc *webrtc.DataChannel) {
 		})
 		dc.OnMessage(func(msg webrtc.DataChannelMessage) { s.onControl(msg.Data) })
 	}
+}
+
+// listening reports whether the page's control channel is open.
+func (s *session) listening() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.control != nil
 }
 
 func (s *session) send(v any) {
@@ -551,6 +562,7 @@ func (s *session) watch() {
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
 	wasLocked := false
+	embedded, embeddedSent := false, false
 	for {
 		select {
 		case <-s.ctx.Done():
@@ -560,6 +572,13 @@ func (s *session) watch() {
 		if locked := s.locked(); locked != wasLocked {
 			wasLocked = locked
 			s.send(map[string]any{"t": "desk", "locked": locked})
+		}
+		s.m.tendDisplay(s.vsize, s.scale)
+		// Told once the page listens, and again whenever it changes (the
+		// lid is opened or closed).
+		if e := s.m.cursorEmbedded(); s.listening() && (!embeddedSent || e != embedded) {
+			embedded, embeddedSent = e, true
+			s.send(map[string]any{"t": "pointer", "embedded": e})
 		}
 		now := s.m.o.Now()
 		s.mu.Lock()
@@ -590,6 +609,11 @@ func (s *session) close(reason string) {
 		cancel()
 		if s.pc != nil {
 			_ = s.pc.Close()
+		}
+		// The encoder has stopped by now; a replaced session leaves the
+		// monitor for its successor.
+		if reason != "replaced" {
+			s.m.releaseDisplay()
 		}
 		s.m.release(s)
 		s.m.event("remote_close", map[string]string{"session_id": s.id, "holder": s.holder, "remote": s.remote, "reason": reason,

@@ -68,5 +68,16 @@ ffmpeg and inbound UDP port 7071 (`-remote-udp-port`); the firewall rule must
 allow UDP for the vm-agent.exe of the release in use. See
 `docs/remote-desktop-design.md`.
 
+With no active display (a closed laptop lid) the remote desktop captures at
+about 16 frames a second. To get the usual rate, install the virtual display
+driver once, as administrator, with the panel's resolution:
+`windows/virtual-display.ps1 -Action install -Width 2560 -Height 1600`.
+vm-agent then adds a virtual monitor while a session needs one and removes it
+afterwards; no elevation is needed at run time. `-Action uninstall` removes
+the driver and everything the script added. The driver is Amyuni's USB Mobile
+Monitor Virtual Display (usbmmidd v2, copyright Amyuni Technologies Inc.); the
+script downloads it from the vendor and checks its SHA-256 and its Microsoft
+signature before installing.
+
 Authentication and TLS are not implemented (spec D9): bind `-listen` to the
 platform-facing interface and restrict the port at the network layer.

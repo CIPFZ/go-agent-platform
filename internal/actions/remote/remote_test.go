@@ -359,8 +359,19 @@ func TestIdleSessionIsReleased(t *testing.T) {
 	e := newEnv(t, 1500*time.Millisecond)
 	v := newViewer(t)
 	e.open(t, v, "alice", "tab-1")
-	if m := v.message("bye"); m["reason"] != "idle" {
-		t.Fatalf("bye = %v", m)
+	// The audit event is the outcome; the page's "bye" is only delivered if
+	// its connection came up before the session ended, which a slow machine
+	// does not guarantee within the idle time used here.
+	if got := <-e.events; got != "remote_open:" {
+		t.Fatalf("event = %q", got)
+	}
+	select {
+	case got := <-e.events:
+		if got != "remote_close:idle" {
+			t.Fatalf("event = %q", got)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the idle session was not released")
 	}
 	waitFor(t, "release", func() bool { return e.m.InUse() == nil })
 }
@@ -461,5 +472,161 @@ func TestClipboardAndLockStateReachThePage(t *testing.T) {
 	}
 	if m.InUse() == nil {
 		t.Fatal("locking the desktop ended the session")
+	}
+}
+
+// fakeVirtualDisplay stands in for the driver: the compositor is active
+// while a real or a virtual monitor is present.
+type fakeVirtualDisplay struct {
+	mu      sync.Mutex
+	real    bool
+	plugged int
+	plugs   []string
+}
+
+func (f *fakeVirtualDisplay) Installed() bool { return true }
+
+func (f *fakeVirtualDisplay) Active() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.real || f.plugged > 0
+}
+
+func (f *fakeVirtualDisplay) Plugged() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.plugged
+}
+
+func (f *fakeVirtualDisplay) RealDisplay() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.real
+}
+
+func (f *fakeVirtualDisplay) Plug(size protocol.Rect, scale float64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.plugged++
+	f.plugs = append(f.plugs, fmt.Sprintf("%dx%d@%.2f", size.W, size.H, scale))
+	return nil
+}
+
+func (f *fakeVirtualDisplay) Unplug() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.plugged > 0 {
+		f.plugged--
+	}
+	return nil
+}
+
+func (f *fakeVirtualDisplay) setReal(v bool) {
+	f.mu.Lock()
+	f.real = v
+	f.mu.Unlock()
+}
+
+func TestVirtualDisplayFollowsTheSession(t *testing.T) {
+	vd := &fakeVirtualDisplay{}
+	dir := t.TempDir()
+	newManager := func() *Manager {
+		return New(Options{Input: input.NewService(&fakeInput{}), Screen: screen.NewService(fakeScreen{}), Source: fakeSource{runs: make(chan Params, 4)},
+			Loopback: true, VirtualDisplay: vd, StateDir: dir})
+	}
+	m := newManager()
+	open := func(client string) *OpenResult {
+		v := newViewer(t)
+		res, err := m.Open(context.Background(), OpenRequest{SDP: v.offer, Holder: "alice", ClientID: client})
+		if err != nil {
+			t.Fatal(err)
+		}
+		v.answer(res.SDP)
+		return res
+	}
+
+	// No display is active: the session brings its own, sized like the desktop.
+	pv := newViewer(t)
+	pres, err := m.Open(context.Background(), OpenRequest{SDP: pv.offer, Holder: "alice", ClientID: "tab-0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pv.answer(pres.SDP)
+	// The virtual monitor carries the pointer in its picture; the page is told.
+	if msg := pv.message("pointer"); msg["embedded"] != true {
+		t.Fatalf("pointer = %v", msg)
+	}
+	if err := m.Close(pres.SessionID); err != nil {
+		t.Fatal(err)
+	}
+	vd.plugs = nil
+	first := open("tab-1")
+	if vd.Plugged() != 1 || len(vd.plugs) != 1 || vd.plugs[0] != "1920x1080@1.00" || !markerExists(dir) {
+		t.Fatalf("after open: plugged %d %v marker %v", vd.Plugged(), vd.plugs, markerExists(dir))
+	}
+	// The same tab reconnecting keeps it.
+	second := open("tab-1")
+	if second.SessionID == first.SessionID || vd.Plugged() != 1 || len(vd.plugs) != 1 {
+		t.Fatalf("after reconnect: plugged %d %v", vd.Plugged(), vd.plugs)
+	}
+	// The lid is opened: the desktop goes back to the panel.
+	m.vd.mu.Lock()
+	m.vd.changed = time.Time{}
+	m.vd.mu.Unlock()
+	vd.setReal(true)
+	waitFor(t, "unplug when a real display returns", func() bool { return vd.Plugged() == 0 })
+	// The lid is closed again during the session.
+	m.vd.mu.Lock()
+	m.vd.changed = time.Time{}
+	m.vd.mu.Unlock()
+	vd.setReal(false)
+	waitFor(t, "plug when the display goes away", func() bool { return vd.Plugged() == 1 })
+	// The session ends: the monitor goes with it.
+	if err := m.Close(second.SessionID); err != nil {
+		t.Fatal(err)
+	}
+	if vd.Plugged() != 0 || markerExists(dir) {
+		t.Fatalf("after close: plugged %d marker %v", vd.Plugged(), markerExists(dir))
+	}
+	// With a real display nothing is added.
+	vd.setReal(true)
+	third := open("tab-1")
+	if vd.Plugged() != 0 {
+		t.Fatal("a virtual monitor was added although a display is active")
+	}
+	_ = m.Close(third.SessionID)
+	m.Shutdown()
+
+	// The real display's size and scale were noted while it was on (the
+	// fake screen reports 1920x1080 at 100 %); whatever the desktop claims
+	// later, the virtual monitor gets those.
+	if r, ok := loadDisplayRecord(dir); !ok || r != (displayRecord{W: 1920, H: 1080, Scale: 1}) {
+		t.Fatalf("display record = %+v %v", r, ok)
+	}
+	saveDisplayRecord(dir, displayRecord{W: 2560, H: 1600, Scale: 1.5})
+	vd.setReal(false)
+	m = newManager()
+	fourth := open("tab-1")
+	if got := vd.plugs[len(vd.plugs)-1]; got != "2560x1600@1.50" {
+		t.Fatalf("virtual monitor geometry = %s", got)
+	}
+	_ = m.Close(fourth.SessionID)
+	m.Shutdown()
+
+	// A run that died with its monitor connected is cleaned up by the next;
+	// a monitor without the marker belongs to someone else and stays.
+	vd.setReal(false)
+	vd.plugged = 1
+	writeMarker(dir)
+	m = newManager()
+	if vd.Plugged() != 0 || markerExists(dir) {
+		t.Fatalf("after restart: plugged %d marker %v", vd.Plugged(), markerExists(dir))
+	}
+	m.Shutdown()
+	vd.plugged = 1
+	m = newManager()
+	defer m.Shutdown()
+	if vd.Plugged() != 1 {
+		t.Fatal("a monitor this process did not add was removed")
 	}
 }

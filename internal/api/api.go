@@ -60,6 +60,9 @@ type Deps struct {
 	// RemoteLoopback lets a viewer on this machine connect (tests).
 	RemoteSource   remote.Source
 	RemoteLoopback bool
+	// RemoteVirtualDisplay adds a monitor for the remote desktop while no
+	// display is active; nil never does.
+	RemoteVirtualDisplay remote.VirtualDisplay
 	// RecordGrabArgs overrides ffmpeg's input arguments (tests).
 	RecordGrabArgs func(fps int, r protocol.Rect) ([]string, error)
 	Session        func() session.State
@@ -139,18 +142,19 @@ func New(cfg *config.Config, sink audit.Sink) (*API, error) {
 		log.Printf("vm-agent: recording unavailable: %v", ffErr)
 	}
 	return NewWithDeps(Deps{
-		FFmpeg:       ffmpeg,
-		Uploader:     uploader,
-		Wayland:      session.Wayland(),
-		Config:       cfg,
-		Audit:        sink,
-		Screen:       screen.NewBackend(),
-		Input:        input.NewBackend(),
-		Window:       window.NewBackend(),
-		Clipboard:    clipboard.NewBackend(),
-		Session:      session.Detect,
-		DPIAwareness: session.InitDPIAwareness(),
-		Policy:       pol,
+		FFmpeg:               ffmpeg,
+		Uploader:             uploader,
+		Wayland:              session.Wayland(),
+		RemoteVirtualDisplay: remote.PlatformVirtualDisplay(),
+		Config:               cfg,
+		Audit:                sink,
+		Screen:               screen.NewBackend(),
+		Input:                input.NewBackend(),
+		Window:               window.NewBackend(),
+		Clipboard:            clipboard.NewBackend(),
+		Session:              session.Detect,
+		DPIAwareness:         session.InitDPIAwareness(),
+		Policy:               pol,
 	})
 }
 
