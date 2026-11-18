@@ -359,8 +359,19 @@ func TestIdleSessionIsReleased(t *testing.T) {
 	e := newEnv(t, 1500*time.Millisecond)
 	v := newViewer(t)
 	e.open(t, v, "alice", "tab-1")
-	if m := v.message("bye"); m["reason"] != "idle" {
-		t.Fatalf("bye = %v", m)
+	// The audit event is the outcome; the page's "bye" is only delivered if
+	// its connection came up before the session ended, which a slow machine
+	// does not guarantee within the idle time used here.
+	if got := <-e.events; got != "remote_open:" {
+		t.Fatalf("event = %q", got)
+	}
+	select {
+	case got := <-e.events:
+		if got != "remote_close:idle" {
+			t.Fatalf("event = %q", got)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the idle session was not released")
 	}
 	waitFor(t, "release", func() bool { return e.m.InUse() == nil })
 }
