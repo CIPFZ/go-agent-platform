@@ -81,6 +81,9 @@ try {
     await sleep(1500);
     // The clicks go to the middle of the screen: never send them unless the
     // test window is what will receive them (an open Start menu covers it).
+    // Another application may hold the foreground; ask for it.
+    await api('POST', '/v1/window/activate', { title: 'vm-agent-dpi-test', match: 'exact', pick: 'first' }).catch(() => null);
+    await sleep(300);
     const active = (await api('GET', '/v1/window/active').catch(() => null))?.title;
     if (active !== 'vm-agent-dpi-test') throw new Error(`the test window is not in front (active window: ${active ?? 'none'}); nothing was clicked`);
   }

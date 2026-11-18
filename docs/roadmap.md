@@ -23,7 +23,8 @@ HTTP 骨架与直通鉴权位、审计、去重、`probe`、`capabilities`、`sc
 设计、实测数据与分阶段计划见 [`remote-desktop-design.md`](remote-desktop-design.md)。仅 Windows，以 `-remote` 启用。
 
 - 已完成：浏览器经 WebRTC 观看并操作桌面（视频、鼠标、键盘、本地光标、使用权）、合盖时自动切换到 GDI 采集、剪贴板文本同步、Mac 的 Command 键映射、本机输入法、声音。
-- 未完成：合盖时的流畅画面（虚拟显示驱动）、锁屏与 UAC、多显示器选择、多机入口。
+- 已完成：合盖时的流畅画面。装上虚拟显示驱动（`deploy/windows/virtual-display.ps1`）后，会话期间自动加一台虚拟显示器，合盖时的帧率与延迟与亮屏持平。
+- 未完成：锁屏与 UAC、多显示器选择、多机入口。
 - 只在一台 Windows 11 笔记本上验证过；`spec.md` 的正文尚未并入这部分内容，以设计文档为准。
 
 ## 需要真实环境的验证

@@ -16,6 +16,7 @@ import (
 	"github.com/pion/webrtc/v4"
 
 	"github.com/CIPFZ/go-agent-platform/internal/actions/input"
+	"github.com/CIPFZ/go-agent-platform/internal/protocol"
 )
 
 // Wire limits of the data channels.
@@ -50,6 +51,9 @@ type session struct {
 	remote   string
 	started  time.Time
 	params   Params
+	// vsize and scale are what a virtual monitor is given.
+	vsize protocol.Rect
+	scale float64
 
 	pc    *webrtc.PeerConnection
 	track *webrtc.TrackLocalStaticRTP
@@ -561,6 +565,7 @@ func (s *session) watch() {
 			wasLocked = locked
 			s.send(map[string]any{"t": "desk", "locked": locked})
 		}
+		s.m.tendDisplay(s.vsize, s.scale)
 		now := s.m.o.Now()
 		s.mu.Lock()
 		state, idle := s.state, now.Sub(s.lastInput)
@@ -590,6 +595,11 @@ func (s *session) close(reason string) {
 		cancel()
 		if s.pc != nil {
 			_ = s.pc.Close()
+		}
+		// The encoder has stopped by now; a replaced session leaves the
+		// monitor for its successor.
+		if reason != "replaced" {
+			s.m.releaseDisplay()
 		}
 		s.m.release(s)
 		s.m.event("remote_close", map[string]string{"session_id": s.id, "holder": s.holder, "remote": s.remote, "reason": reason,

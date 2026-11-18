@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"path/filepath"
 	"time"
 
 	"github.com/CIPFZ/go-agent-platform/internal/actions/remote"
@@ -29,17 +30,19 @@ func (a *API) newRemote(d Deps) *remote.Manager {
 		return nil
 	}
 	return remote.New(remote.Options{
-		FFmpeg:      d.FFmpeg,
-		UDPPort:     d.Config.RemoteUDPPort,
-		IdleRelease: d.Config.RemoteIdleRelease,
-		Input:       a.input,
-		Screen:      a.screen,
-		Clipboard:   a.clipboard,
-		Desktop:     func() remote.Desktop { return remote.Desktop{Locked: a.session().Locked} },
-		Source:      d.RemoteSource,
-		Loopback:    d.RemoteLoopback,
-		Now:         d.Now,
-		OnInput:     a.markInput,
+		FFmpeg:         d.FFmpeg,
+		UDPPort:        d.Config.RemoteUDPPort,
+		IdleRelease:    d.Config.RemoteIdleRelease,
+		Input:          a.input,
+		Screen:         a.screen,
+		Clipboard:      a.clipboard,
+		VirtualDisplay: d.RemoteVirtualDisplay,
+		StateDir:       filepath.Dir(d.Config.JobDir),
+		Desktop:        func() remote.Desktop { return remote.Desktop{Locked: a.session().Locked} },
+		Source:         d.RemoteSource,
+		Loopback:       d.RemoteLoopback,
+		Now:            d.Now,
+		OnInput:        a.markInput,
 		OnEvent: func(kind string, details map[string]string) {
 			a.audit.Record(audit.Event{Kind: kind, Details: details})
 		},

@@ -73,6 +73,11 @@ type Options struct {
 	Source Source
 	// Audio overrides the capture of the desktop's sound (tests).
 	Audio AudioSource
+	// VirtualDisplay adds a monitor while no display is active; nil never
+	// does.
+	VirtualDisplay VirtualDisplay
+	// StateDir holds the marker of a virtual monitor this process added.
+	StateDir string
 	// Loopback also offers loopback addresses, for a viewer on this machine.
 	Loopback bool
 	Now      func() time.Time
@@ -96,6 +101,7 @@ type Manager struct {
 	o   Options
 	src Source
 	aud AudioSource
+	vd  vdisplayState
 
 	initOnce sync.Once
 	initErr  error
@@ -120,7 +126,17 @@ func New(o Options) *Manager {
 	if aud == nil {
 		aud = newFFmpegAudio(o.FFmpeg)
 	}
-	return &Manager{o: o, src: src, aud: aud}
+	m := &Manager{o: o, src: src, aud: aud}
+	m.reclaimDisplay()
+	if o.VirtualDisplay != nil && o.Screen != nil {
+		// vm-agent usually starts at logon, with the real display on.
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		if displays, err := o.Screen.Displays(ctx); err == nil && len(displays) > 0 {
+			m.rememberDisplay(displays[0])
+		}
+		cancel()
+	}
+	return m
 }
 
 // Available reports why sessions cannot be opened, or nil.
@@ -281,6 +297,7 @@ func (m *Manager) Open(ctx context.Context, r OpenRequest) (*OpenResult, error) 
 		return nil, protocol.Errorf(protocol.CodeNoDisplay, "no display")
 	}
 	display := displays[0]
+	m.rememberDisplay(display)
 	p := Params{FPS: r.FPS, BitrateKbps: r.BitrateKbps, Display: display.Bounds}
 	if p.FPS == 0 {
 		p.FPS = DefaultFPS
@@ -310,13 +327,23 @@ func (m *Manager) Open(ctx context.Context, r OpenRequest) (*OpenResult, error) 
 	if replaced != nil {
 		replaced.close("replaced")
 	}
+	// With no active display (a closed lid) a virtual monitor is added, of
+	// the size and scale the desktop already has, so that capture can use
+	// Desktop Duplication. It is removed when the session ends.
+	vsize, vscale := m.virtualGeometry(display)
+	s.vsize, s.scale = vsize, vscale
+	vdisplay := m.ensureDisplay(vsize, vscale)
 
 	answer, err := m.connect(ctx, s, r.SDP)
 	if err != nil {
 		s.close("setup_failed")
 		return nil, err
 	}
-	m.event("remote_open", map[string]string{"session_id": s.id, "holder": s.holder, "remote": s.remote})
+	details := map[string]string{"session_id": s.id, "holder": s.holder, "remote": s.remote}
+	if vdisplay != "" {
+		details["virtual_display"] = vdisplay
+	}
+	m.event("remote_open", details)
 	go s.watch()
 	return &OpenResult{SessionID: s.id, SDP: answer, Display: display.Bounds, Scale: display.Scale, FPS: p.FPS,
 		BitrateKbps: p.BitrateKbps, IdleReleaseMS: m.o.IdleRelease.Milliseconds()}, nil
@@ -422,6 +449,7 @@ func (m *Manager) Shutdown() {
 	if s != nil {
 		s.close("agent_shutdown")
 	}
+	m.releaseDisplay()
 	if m.mux != nil {
 		_ = m.mux.Close()
 	}
