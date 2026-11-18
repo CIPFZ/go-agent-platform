@@ -5,6 +5,7 @@ package securedesk
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -14,7 +15,9 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
+	"time"
 
 	"github.com/Microsoft/go-winio"
 	"golang.org/x/sys/windows"
@@ -50,7 +53,9 @@ func RunHelper(ffmpeg string) int {
 		log.Printf("desktop helper: %v", err)
 		return 1
 	}
-	h := &helper{ffmpeg: ffmpeg, work: make(chan func(*remote.Injector), 256)}
+	h := &helper{ffmpeg: ffmpeg, session: sid, work: make(chan func(*remote.Injector), 256)}
+	locked, known := win.SessionLocked(sid)
+	log.Printf("desktop helper: session %d locked=%v (known=%v)", sid, locked, known)
 	go h.inputThread()
 	log.Printf("desktop helper: serving session %d", sid)
 	for {
@@ -64,9 +69,45 @@ func RunHelper(ffmpeg string) int {
 }
 
 type helper struct {
-	ffmpeg string
-	work   chan func(*remote.Injector)
+	ffmpeg  string
+	session uint32
+	work    chan func(*remote.Injector)
+
+	mu      sync.Mutex
+	checked time.Time
+	allowed bool
+	refused time.Time
 }
+
+// lockScreen reports whether the helper may act: only while the session is
+// locked and no elevation prompt is up. The prompt uses the same desktop as
+// the lock screen, and a helper that operated it would let any program of
+// the user answer it, which is what the prompt exists to prevent. On the
+// lock screen input is harmless without the password. An unreadable state
+// counts as not locked.
+func (h *helper) lockScreen() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if time.Since(h.checked) < 250*time.Millisecond {
+		return h.allowed
+	}
+	locked, known := win.SessionLocked(h.session)
+	h.allowed = known && locked && !win.ProcessInSession("consent.exe", h.session)
+	h.checked = time.Now()
+	return h.allowed
+}
+
+// refuse logs a refusal, at most once every ten seconds.
+func (h *helper) refuse(what string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if time.Since(h.refused) > 10*time.Second {
+		h.refused = time.Now()
+		log.Printf("desktop helper: refused %s: the session is not on the lock screen", what)
+	}
+}
+
+var errNotLockScreen = errors.New("the session is not on the lock screen")
 
 // inputThread applies input on one OS thread, which is moved to whichever
 // desktop is receiving input before every message.
@@ -96,7 +137,9 @@ func (h *helper) serve(conn net.Conn) {
 	case "input":
 		for {
 			line, err := br.ReadBytes('\n')
-			if len(line) > 1 {
+			if len(line) > 1 && !h.lockScreen() {
+				h.refuse("input")
+			} else if len(line) > 1 {
 				msg := append([]byte(nil), line...)
 				h.work <- func(inj *remote.Injector) {
 					if err := inj.Apply(msg); err != nil {
@@ -123,6 +166,9 @@ func (h *helper) serve(conn net.Conn) {
 // reaches the command line is a number checked here.
 func (h *helper) video(conn net.Conn, br *bufio.Reader, r request) error {
 	switch {
+	case !h.lockScreen():
+		h.refuse("video")
+		return errNotLockScreen
 	case h.ffmpeg == "":
 		return fmt.Errorf("the service was installed without an ffmpeg path")
 	case r.FPS < 1 || r.FPS > 60, r.Kbps < 100 || r.Kbps > 50000, r.Port < 1024 || r.Port > 65535,
@@ -153,11 +199,32 @@ func (h *helper) video(conn net.Conn, br *bufio.Reader, r request) error {
 		_, _ = io.Copy(io.Discard, br)
 		close(closed)
 	}()
+	// The capture ends as soon as the lock screen is left.
+	left := make(chan struct{})
+	go func() {
+		t := time.NewTicker(300 * time.Millisecond)
+		defer t.Stop()
+		for {
+			select {
+			case <-closed:
+				return
+			case <-t.C:
+				if !h.lockScreen() {
+					close(left)
+					return
+				}
+			}
+		}
+	}()
 	select {
 	case <-closed:
 		_ = cmd.Process.Kill()
 		<-exited
 		return nil
+	case <-left:
+		_ = cmd.Process.Kill()
+		<-exited
+		return errNotLockScreen
 	case err := <-exited:
 		msg := strings.TrimSpace(stderr.String())
 		if i := strings.IndexByte(msg, '\n'); i >= 0 {
