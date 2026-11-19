@@ -7,13 +7,14 @@
 - HTTP/1.1，路径前缀 `/v1`（协议版本，与服务版本独立）。每个响应带 `X-Agent-Version`。
 - JSON 请求体上限 8 MiB，拒绝未知字段，空请求体视为 `{}`。`file/upload` 使用 multipart，上限 1 GiB。
 - 服务器参数：`ReadHeaderTimeout` 10 秒、`IdleTimeout` 120 秒、`MaxHeaderBytes` 64 KiB。
-- 当前不鉴权、不加密（spec D9），由网络层隔离端口。
+- 默认不鉴权、不加密（spec D9），由网络层隔离端口。以 `-auth-token-file` 启动时，除 `GET /remote/` 外的每个请求都要带 `Authorization: Bearer <口令>`，否则返回 `401 unauthorized`（`details.reason` 见 `errors.md`）；同一来源地址连续输错 10 次后一分钟内一律拒绝。
 - 带有 `Origin` 头而来源不是 `vm-agent` 自身地址的请求，以及 `Host` 不是 IP 地址、`localhost`、本机主机名或 `-allowed-hosts` 所列名称的请求，一律以 `invalid_request` 拒绝（`details.reason` 为 `foreign_origin` 或 `unknown_host`）。这只挡浏览器替网页发出的请求，脚本与客户端不受影响。
 
 ## 请求头
 
 | 头 | 说明 |
 | --- | --- |
+| `Authorization` | 配置了访问口令时必需：`Bearer <口令>` |
 | `X-Request-Id` | 可选，16 到 128 个 `[A-Za-z0-9._-]`；用于审计关联与去重 |
 | `X-Timeout-Ms` | 可选，覆盖默认超时；一般接口截断到 600000，`file/download`、`file/upload`、`record/{id}` 下载与 `record/{id}/upload` 截断到 3600000 |
 

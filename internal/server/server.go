@@ -38,8 +38,12 @@ type Options struct {
 	Audit          audit.Sink
 	Dedup          *dedup.Cache // nil disables deduplication
 	MaxConcurrency int
-	// Authenticate occupies the authentication slot; nil means Passthrough.
+	// Authenticate occupies the authentication slot; nil means Passthrough,
+	// or the access-token check when AuthTokenFile is set.
 	Authenticate Middleware
+	// AuthTokenFile holds the access token every request must carry, except
+	// those to public routes; empty means no authentication.
+	AuthTokenFile string
 	// AllowedHosts are host names vm-agent may be addressed by, besides
 	// addresses and localhost (see guard).
 	AllowedHosts []string
@@ -82,6 +86,8 @@ type Route struct {
 	// Action names the endpoint in audit records and metrics, e.g. "screen.capture".
 	Action string
 	Class  Class
+	// Public routes need no access token.
+	Public bool
 	// Transfer routes use the 1 hour timeout cap instead of 10 minutes.
 	Transfer bool
 	Handler  HandlerFunc
@@ -99,9 +105,6 @@ func New(opts Options, routes []*Route) *Server {
 	if opts.MaxConcurrency <= 0 {
 		opts.MaxConcurrency = 32
 	}
-	if opts.Authenticate == nil {
-		opts.Authenticate = Passthrough
-	}
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
@@ -118,9 +121,17 @@ func New(opts Options, routes []*Route) *Server {
 		s.mux.Handle(rt.Method+" "+rt.Path, s.serveRoute(rt))
 	}
 	s.mux.HandleFunc("/", s.serveUnknown)
+	auth := opts.Authenticate
+	switch {
+	case auth != nil:
+	case opts.AuthTokenFile != "":
+		auth = s.authenticate(&authenticator{tokenFile: opts.AuthTokenFile, now: opts.Now, failures: map[string]*authFailures{}})
+	default:
+		auth = Passthrough
+	}
 	// Spec section 3: middleware -> dedup -> router -> handler. Dedup needs
 	// the route's retry class, so it runs inside the per-route wrapper.
-	s.handler = s.recover(s.observe(s.guard(s.validateHeaders(opts.Authenticate(s.limit(s.mux))))))
+	s.handler = s.recover(s.observe(s.guard(s.validateHeaders(auth(s.limit(s.mux))))))
 	return s
 }
 

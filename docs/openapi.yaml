@@ -18,8 +18,10 @@ info:
       dedup window by method + path + request id: a repeat while the first is
       running gets conflict/in_flight, a later repeat replays the first
       response with HTTP 200 and X-Dedup-Hit: true.
-    - Authentication and TLS are not implemented (spec D9); restrict access at
-      the network layer.
+    - Authentication is optional: an agent started with -auth-token-file
+      requires "Authorization: Bearer <token>" on every request except
+      GET /remote/ and answers 401 unauthorized otherwise. TLS is not
+      implemented; restrict access at the network layer.
 servers:
   - url: http://{host}:7070
     variables:
@@ -1269,7 +1271,7 @@ components:
       properties:
         code:
           type: string
-          enum: [invalid_request, not_found, ambiguous, conflict, too_large, unsupported, no_display, busy, timeout, io_failed, internal]
+          enum: [invalid_request, unauthorized, not_found, ambiguous, conflict, too_large, unsupported, no_display, busy, timeout, io_failed, internal]
         message: {type: string}
         retryable: {type: boolean}
         details: {type: object, additionalProperties: true}

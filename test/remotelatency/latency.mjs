@@ -5,7 +5,7 @@
 // times how long the picture takes to change. Needs Node 22 or newer.
 //
 //   node test/remotelatency/latency.mjs --agent http://HOST:7070 \
-//        --winapp 'C:\path\winapp.exe' [--samples 40] [--quality 60,0]
+//        --winapp 'C:\path\winapp.exe' [--samples 40] [--quality 60,0] [--token TOKEN]
 //
 // Times are milliseconds from sending the click:
 //   received  the last packet of the changed frame arrived in the browser
@@ -23,7 +23,9 @@ const chrome = args.chrome || '/Applications/Google Chrome.app/Contents/MacOS/Go
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function api(method, path, body) {
-  const res = await fetch(agent + path, { method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+  const headers = { 'Content-Type': 'application/json' };
+  if (args.token) headers.Authorization = 'Bearer ' + args.token;
+  const res = await fetch(agent + path, { method, headers, body: body ? JSON.stringify(body) : undefined });
   const reply = await res.json();
   if (!reply.ok) throw new Error(`${method} ${path}: ${JSON.stringify(reply.error)}`);
   return reply.result;
@@ -103,7 +105,7 @@ try {
   ws.onmessage = (e) => { const m = JSON.parse(e.data); if (pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); } };
   const cdp = (method, params) => new Promise((done) => { pending.set(++id, done); ws.send(JSON.stringify({ id, method, params })); });
   await cdp('Page.enable');
-  await cdp('Page.addScriptToEvaluateOnNewDocument', { source: `try { localStorage.setItem('vmagent.quality', ${JSON.stringify(quality)}); } catch (e) {}` });
+  await cdp('Page.addScriptToEvaluateOnNewDocument', { source: `try { localStorage.setItem('vmagent.quality', ${JSON.stringify(quality)}); if (${JSON.stringify(args.token || '')}) localStorage.setItem('vmagent.token', ${JSON.stringify(args.token || '')}); } catch (e) {}` });
   await cdp('Page.navigate', { url: `${agent}/remote/?name=latency-test&auto` });
   await sleep(1500);
   const r = await cdp('Runtime.evaluate', { expression: `(${measure})(${samples})`, awaitPromise: true, returnByValue: true });

@@ -21,6 +21,9 @@ const (
 	CodeTimeout        Code = "timeout"
 	CodeIOFailed       Code = "io_failed"
 	CodeInternal       Code = "internal"
+	// CodeUnauthorized: the access token is missing or wrong (only when
+	// vm-agent runs with -auth-token-file).
+	CodeUnauthorized Code = "unauthorized"
 )
 
 // HTTPStatus returns the status code mandated for c by spec section 5.5.
@@ -28,6 +31,8 @@ func (c Code) HTTPStatus() int {
 	switch c {
 	case CodeInvalidRequest:
 		return http.StatusBadRequest
+	case CodeUnauthorized:
+		return http.StatusUnauthorized
 	case CodeNotFound:
 		return http.StatusNotFound
 	case CodeAmbiguous, CodeConflict:
@@ -83,6 +88,11 @@ const (
 	// not vm-agent's.
 	ReasonForeignOrigin = "foreign_origin"
 	ReasonUnknownHost   = "unknown_host"
+	// Reasons of unauthorized.
+	ReasonTokenMissing     = "token_missing"
+	ReasonTokenWrong       = "token_wrong"
+	ReasonTokenUnavailable = "token_unavailable"
+	ReasonTooManyAttempts  = "too_many_attempts"
 )
 
 // Error is the error object of an error response (spec section 5.4).

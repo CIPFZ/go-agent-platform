@@ -39,15 +39,16 @@ func main() {
 	fps := flag.Int("fps", 30, "requested frame rate")
 	kbps := flag.Int("bitrate", 0, "requested bitrate in kbit/s, 0 for the default")
 	holder := flag.String("holder", "remoteprobe", "name shown while the desktop is taken")
+	token := flag.String("token", "", "access token, for an agent started with -auth-token-file")
 	wiggle := flag.Bool("wiggle", false, "move the pointer in a small square and back, to test input")
 	flag.Parse()
-	if err := run(*agent, *seconds, *fps, *kbps, *holder, *wiggle); err != nil {
+	if err := run(*agent, *seconds, *fps, *kbps, *holder, *token, *wiggle); err != nil {
 		fmt.Fprintln(os.Stderr, "remoteprobe:", err)
 		os.Exit(1)
 	}
 }
 
-func run(agent string, seconds, fps, kbps int, holder string, wiggle bool) error {
+func run(agent string, seconds, fps, kbps int, holder, token string, wiggle bool) error {
 	var se webrtc.SettingEngine
 	se.SetICEMulticastDNSMode(ice.MulticastDNSModeDisabled)
 	se.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4})
@@ -154,7 +155,15 @@ func run(agent string, seconds, fps, kbps int, holder string, wiggle bool) error
 		req["bitrate_kbps"] = kbps
 	}
 	body, _ := json.Marshal(req)
-	resp, err := http.Post(agent+"/v1/remote/sessions", "application/json", bytes.NewReader(body))
+	post, err := http.NewRequest(http.MethodPost, agent+"/v1/remote/sessions", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	post.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		post.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := http.DefaultClient.Do(post)
 	if err != nil {
 		return err
 	}
@@ -166,6 +175,9 @@ func run(agent string, seconds, fps, kbps int, holder string, wiggle bool) error
 	}
 	defer func() {
 		r, _ := http.NewRequest(http.MethodDelete, agent+"/v1/remote/sessions/"+env.Result.SessionID, nil)
+		if token != "" {
+			r.Header.Set("Authorization", "Bearer "+token)
+		}
 		if resp, err := http.DefaultClient.Do(r); err == nil {
 			resp.Body.Close()
 		}

@@ -105,6 +105,24 @@ function teardown() {
 
 function retry(ms) { clearTimeout(retryTimer); if (wanted) retryTimer = setTimeout(connect, ms); }
 
+// The access token, for an agent started with -auth-token-file. It is asked
+// for when the agent answers 401 and kept in this browser.
+let token = store(localStorage, 'vmagent.token') || '';
+function api(url, init) {
+  init = init || {};
+  if (token) init.headers = Object.assign({}, init.headers, { Authorization: 'Bearer ' + token });
+  return fetch(url, init);
+}
+function askToken(reason) {
+  const why = { token_wrong: '口令不对，请重新输入。', too_many_attempts: '口令输错次数过多，这个地址被暂时拒绝，请一分钟后再试。',
+    token_unavailable: '远端读不到它的口令文件，暂时无法验证。' }[reason] || '这台机器需要访问口令。';
+  show('<h1>访问口令</h1><p>' + esc(why) + '</p><input id="tok" type="password" autocomplete="current-password" placeholder="访问口令"><button id="tokgo">确定</button>');
+  setState('需要访问口令', true);
+  const box = $('tok'); box.focus();
+  const go = () => { const v = box.value.trim(); if (!v) return; token = v; store(localStorage, 'vmagent.token', v); connect(); };
+  $('tokgo').onclick = go; box.onkeydown = (e) => { if (e.key === 'Enter') go(); };
+}
+
 // A tab can stay open across upgrades of vm-agent and would keep running the
 // page it loaded long ago. Before every connection the agent's version is
 // compared with the one this page came from, and the page reloads if they
@@ -159,11 +177,12 @@ async function connect() {
     const [fps, kbps] = $('quality').value.split(',').map(Number);
     const body = { sdp: pc.localDescription.sdp, holder, client_id: clientId, fps };
     if (kbps) body.bitrate_kbps = kbps;
-    const res = await fetch('/v1/remote/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const res = await api('/v1/remote/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const reply = await res.json();
     if (me !== pc) return;
     if (!reply.ok) {
       const err = reply.error || {}, d = err.details || {};
+      if (err.code === 'unauthorized') { teardown(); askToken(d.reason); return; }
       if (d.reason === 'remote_in_use') {
         const since = d.since ? new Date(d.since).toLocaleTimeString() : '';
         show('<h1>正在被使用</h1><p><b>' + esc(d.holder) + '</b> 从 ' + esc(since) + ' 起正在使用这台机器。对方释放后会自动连接。</p><button id="stop">不等了</button>');
@@ -331,7 +350,7 @@ document.addEventListener('paste', async (e) => {
   const text = (e.clipboardData && e.clipboardData.getData('text/plain')) || '';
   if (text) {
     lastClip = text;
-    try { await fetch('/v1/clipboard', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) }); } catch (err) {}
+    try { await api('/v1/clipboard', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) }); } catch (err) {}
   }
   const held = down.has('ControlLeft') || down.has('ControlRight');
   if (!held) sendInput({ t: 'kd', c: 'ControlLeft' });
@@ -355,7 +374,7 @@ async function gotClip(text) {
   $('clip').hidden = pendingClip === null;
 }
 async function fetchClip() {
-  try { const r = await (await fetch('/v1/clipboard')).json(); if (r.ok && r.result.text) gotClip(r.result.text); } catch (e) {}
+  try { const r = await (await api('/v1/clipboard')).json(); if (r.ok && r.result.text) gotClip(r.result.text); } catch (e) {}
 }
 $('clip').onclick = async () => { if (pendingClip !== null && await copyLocal(pendingClip)) { pendingClip = null; $('clip').hidden = true; } };
 
@@ -401,7 +420,7 @@ $('bar').addEventListener('pointerleave', () => $('bar').classList.remove('show'
 function release(keepalive) {
   const id = session && session.session_id;
   wanted = false; clearTimeout(retryTimer);
-  if (id) fetch('/v1/remote/sessions/' + id, { method: 'DELETE', keepalive: !!keepalive }).catch(() => {});
+  if (id) api('/v1/remote/sessions/' + id, { method: 'DELETE', keepalive: !!keepalive }).catch(() => {});
   teardown();
 }
 $('release').onclick = () => { release(); setState('未连接'); show('<h1>已释放</h1><p>这台机器现在可以被其他人使用。</p><button id="again">重新连接</button>'); $('again').onclick = () => { wanted = true; connect(); }; };

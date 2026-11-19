@@ -89,5 +89,11 @@ installed, anyone who can reach vm-agent's port can see the lock screen and
 type into it, so use it only where that port is restricted
 (`docs/security.md`).
 
-Authentication and TLS are not implemented (spec D9): bind `-listen` to the
-platform-facing interface and restrict the port at the network layer.
+Authentication is off by default (spec D9): bind `-listen` to the
+platform-facing interface and restrict the port at the network layer. On a
+machine that is not behind such a platform, require an access token:
+`windows/install.ps1 ... -GenerateAuthToken` creates one and prints it, or
+pass `-auth-token-file FILE` to vm-agent yourself. Every caller then sends
+`Authorization: Bearer <token>`; the remote desktop page asks for it once.
+There is no TLS, so the token crosses the network in the clear
+(`docs/security.md`).

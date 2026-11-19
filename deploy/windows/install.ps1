@@ -11,6 +11,12 @@
   upgrade and a rollback never lose the configuration or anything under
   state\ (audit log, jobs, recordings).
 
+  -GenerateAuthToken makes vm-agent require an access token (docs/security.md).
+  The token is stored in config\auth-token, readable by this user, SYSTEM
+  and administrators like the rest of %LOCALAPPDATA%; replace the file's
+  content to change the token, remove the -auth-token-file line from
+  config\vm-agent.args and reinstall to stop requiring one.
+
   -RunLevel Highest runs vm-agent elevated so it can send input to elevated
   windows; it needs an administrator account and, to avoid prompts,
   ConsentPromptBehaviorAdmin=0 (preconditions.ps1).
@@ -27,6 +33,9 @@ param(
     [ValidateSet('Limited', 'Highest')][string]$RunLevel = 'Limited',
     [string]$TaskName = 'vm-agent',
     [switch]$Reconfigure,
+    # Require an access token: creates config\auth-token with a random token
+    # (unless the file exists) and adds -auth-token-file to the arguments.
+    [switch]$GenerateAuthToken,
     [switch]$NoStart,
     [int]$KeepReleases = 3
 )
@@ -51,6 +60,26 @@ if ($Reconfigure -or -not (Test-Path -LiteralPath $script:ArgsFile)) {
     Write-Host "install: wrote $($script:ArgsFile)"
 } else {
     Write-Host "install: keeping existing $($script:ArgsFile)"
+}
+
+if ($GenerateAuthToken) {
+    if (-not (Test-Path -LiteralPath $script:TokenFile)) {
+        $bytes = New-Object byte[] 24
+        [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+        $token = [Convert]::ToBase64String($bytes).Replace('+', '-').Replace('/', '_')
+        # No BOM and no newline: the file is the token.
+        [IO.File]::WriteAllText($script:TokenFile, $token, (New-Object Text.UTF8Encoding $false))
+        Write-Host "install: access token written to $($script:TokenFile)"
+        Write-Host "install: the access token is: $token"
+        Write-Host 'install: every caller must now send it as "Authorization: Bearer <token>"; the remote desktop page asks for it once'
+    } else {
+        Write-Host "install: keeping the access token in $($script:TokenFile)"
+    }
+    $configured = @(Get-Content -LiteralPath $script:ArgsFile)
+    if (-not ($configured -match '^-auth-token-file\s')) {
+        $configured += ('-auth-token-file "{0}"' -f $script:TokenFile)
+        Set-Content -LiteralPath $script:ArgsFile -Value $configured -Encoding UTF8
+    }
 }
 
 # The running agent holds its executable open; stop it before replacing a

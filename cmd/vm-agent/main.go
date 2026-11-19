@@ -91,7 +91,7 @@ func run(cfg *config.Config) error {
 		Dedup:          cache,
 		MaxConcurrency: cfg.MaxConcurrency,
 		AllowedHosts:   allowedHosts(cfg),
-		Authenticate:   server.Passthrough,
+		AuthTokenFile:  cfg.AuthTokenFile,
 		AuditVerbose:   cfg.AuditVerbose,
 	}, agent.Routes())
 	agent.SetStats(srv.Stats())
