@@ -60,6 +60,19 @@ func main() {
 	}
 }
 
+// allowedHosts are the names vm-agent answers to: those configured, the
+// name in -listen and this machine's own.
+func allowedHosts(cfg *config.Config) []string {
+	hosts := append([]string(nil), cfg.AllowedHosts...)
+	if h, _, err := net.SplitHostPort(cfg.Listen); err == nil && h != "" {
+		hosts = append(hosts, h)
+	}
+	if name, err := os.Hostname(); err == nil && name != "" {
+		hosts = append(hosts, name, name+".local")
+	}
+	return hosts
+}
+
 func run(cfg *config.Config) error {
 	sink, err := audit.NewRotatingFileSink(cfg.AuditLog, cfg.AuditMaxSize, cfg.AuditMaxFiles)
 	if err != nil {
@@ -77,6 +90,7 @@ func run(cfg *config.Config) error {
 		Audit:          sink,
 		Dedup:          cache,
 		MaxConcurrency: cfg.MaxConcurrency,
+		AllowedHosts:   allowedHosts(cfg),
 		Authenticate:   server.Passthrough,
 		AuditVerbose:   cfg.AuditVerbose,
 	}, agent.Routes())

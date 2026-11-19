@@ -378,7 +378,8 @@ func TestPassthroughAuthenticationSlot(t *testing.T) {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { seen.Add(1); next.ServeHTTP(w, r) })
 	}}, []*Route{{Method: "GET", Path: "/v1/x", Action: "x", Handler: func(*Call) (any, error) { return nil, nil }}})
 	rec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/v1/x", nil))
+	// httptest's default host is example.com, which the guard refuses.
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "http://127.0.0.1/v1/x", nil))
 	if rec.Code != 200 || seen.Load() != 1 {
 		t.Fatalf("auth slot not in chain: code=%d seen=%d", rec.Code, seen.Load())
 	}

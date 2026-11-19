@@ -40,6 +40,9 @@ type Options struct {
 	MaxConcurrency int
 	// Authenticate occupies the authentication slot; nil means Passthrough.
 	Authenticate Middleware
+	// AllowedHosts are host names vm-agent may be addressed by, besides
+	// addresses and localhost (see guard).
+	AllowedHosts []string
 	// AuditVerbose records full argv and typed text.
 	AuditVerbose bool
 	Now          func() time.Time
@@ -51,6 +54,7 @@ type Server struct {
 	mux     *http.ServeMux
 	routes  []*Route
 	limiter chan struct{}
+	hosts   map[string]bool
 	handler http.Handler
 	stats   *Stats
 	// base is cancelled with ErrAgentShutdown when the requests still running
@@ -103,6 +107,12 @@ func New(opts Options, routes []*Route) *Server {
 	}
 	s := &Server{opts: opts, mux: http.NewServeMux(), limiter: make(chan struct{}, opts.MaxConcurrency), stats: newStats()}
 	s.base, s.abort = context.WithCancelCause(context.Background())
+	s.hosts = map[string]bool{}
+	for _, h := range opts.AllowedHosts {
+		if h = hostName(h); h != "" {
+			s.hosts[h] = true
+		}
+	}
 	for _, rt := range routes {
 		s.routes = append(s.routes, rt)
 		s.mux.Handle(rt.Method+" "+rt.Path, s.serveRoute(rt))
@@ -110,7 +120,7 @@ func New(opts Options, routes []*Route) *Server {
 	s.mux.HandleFunc("/", s.serveUnknown)
 	// Spec section 3: middleware -> dedup -> router -> handler. Dedup needs
 	// the route's retry class, so it runs inside the per-route wrapper.
-	s.handler = s.recover(s.observe(s.validateHeaders(opts.Authenticate(s.limit(s.mux)))))
+	s.handler = s.recover(s.observe(s.guard(s.validateHeaders(opts.Authenticate(s.limit(s.mux))))))
 	return s
 }
 

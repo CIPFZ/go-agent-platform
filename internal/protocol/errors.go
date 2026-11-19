@@ -78,6 +78,11 @@ const (
 	// ReasonRemoteInUse marks a request refused because a person is using
 	// the desktop through the web remote desktop.
 	ReasonRemoteInUse = "remote_in_use"
+	// ReasonForeignOrigin and ReasonUnknownHost mark requests a web page
+	// made a browser send: from another site, or under a host name that is
+	// not vm-agent's.
+	ReasonForeignOrigin = "foreign_origin"
+	ReasonUnknownHost   = "unknown_host"
 )
 
 // Error is the error object of an error response (spec section 5.4).
