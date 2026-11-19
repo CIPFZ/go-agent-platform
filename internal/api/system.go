@@ -116,7 +116,9 @@ func (a *API) actions(displayReady bool) []string {
 	if a.uploader != nil {
 		out = append(out, "record_upload")
 	}
-	if displayReady && !a.wayland && a.remoteEnabled() == nil {
+	// The remote desktop also works on a locked desktop when the secure
+	// desktop helper is installed.
+	if !a.wayland && a.remoteEnabled() == nil && (displayReady || (a.session().Locked && a.remote.SecureAvailable())) {
 		out = append(out, "remote")
 	}
 	return out

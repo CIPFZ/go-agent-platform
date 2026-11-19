@@ -63,10 +63,10 @@ func (a *ffmpegAudio) Run(ctx context.Context, emit func(*rtp.Packet)) error {
 		if time.Since(started) > 30*time.Second {
 			failures = 0
 		}
-		if !errors.Is(err, errAudioRestart) {
-			if failures++; failures >= 3 {
-				return err
-			}
+		if errors.Is(err, errAudioRestart) {
+			logf("audio: the playback device changed; restarting the capture")
+		} else if failures++; failures >= 3 {
+			return err
 		}
 		select {
 		case <-ctx.Done():
@@ -107,6 +107,7 @@ func (a *ffmpegAudio) runOnce(ctx context.Context, emit func(*rtp.Packet)) error
 		return errors.New("the audio capture did not start")
 	}
 
+	logf("audio: capturing %d Hz, %d channels", format.SampleRate, format.Channels)
 	cmd := exec.Command(a.ffmpeg, "-hide_banner", "-loglevel", "error", "-fflags", "nobuffer", "-probesize", "32", "-analyzeduration", "0",
 		"-f", "s16le", "-ar", strconv.Itoa(format.SampleRate), "-ac", strconv.Itoa(format.Channels), "-i", "pipe:0",
 		// 10 ms frames keep the delay low; WebRTC carries Opus as 48 kHz stereo.

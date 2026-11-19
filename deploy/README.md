@@ -79,5 +79,15 @@ Monitor Virtual Display (usbmmidd v2, copyright Amyuni Technologies Inc.); the
 script downloads it from the vendor and checks its SHA-256 and its Microsoft
 signature before installing.
 
+A locked desktop cannot be shown or operated by vm-agent itself. To unlock
+from the page, install the secure desktop service once, as administrator:
+`windows/secure-desktop.ps1 -Action install -Binary <vm-agent.exe> -FFmpeg
+<ffmpeg.exe>`. It copies both to `%ProgramFiles%\vm-agent` and runs a
+LocalSystem service from there; run it again after upgrading vm-agent.
+`-Action uninstall` removes the service and the copies. With the service
+installed, anyone who can reach vm-agent's port can see the lock screen and
+type into it, so use it only where that port is restricted
+(`docs/security.md`).
+
 Authentication and TLS are not implemented (spec D9): bind `-listen` to the
 platform-facing interface and restrict the port at the network layer.

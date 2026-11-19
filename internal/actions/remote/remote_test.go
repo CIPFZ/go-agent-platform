@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"net"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -629,4 +630,109 @@ func TestVirtualDisplayFollowsTheSession(t *testing.T) {
 	if vd.Plugged() != 1 {
 		t.Fatal("a monitor this process did not add was removed")
 	}
+}
+
+// fakeSecure stands in for the secure desktop helper: it records the input
+// it is given and sends a small RTP stream to the port it is asked for.
+type fakeSecure struct {
+	mu     sync.Mutex
+	inputs []string
+	videos int
+}
+
+func (f *fakeSecure) Available() bool { return true }
+
+func (f *fakeSecure) Input(data []byte) error {
+	f.mu.Lock()
+	f.inputs = append(f.inputs, string(data))
+	f.mu.Unlock()
+	return nil
+}
+
+func (f *fakeSecure) got() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.inputs...)
+}
+
+func (f *fakeSecure) Video(ctx context.Context, v SecureVideo) error {
+	f.mu.Lock()
+	f.videos++
+	f.mu.Unlock()
+	conn, err := net.Dial("udp4", fmt.Sprintf("127.0.0.1:%d", v.Port))
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	t := time.NewTicker(20 * time.Millisecond)
+	defer t.Stop()
+	var seq uint16
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-t.C:
+		}
+		seq++
+		pkt := rtp.Packet{Header: rtp.Header{Version: 2, PayloadType: 96, SequenceNumber: seq, Timestamp: uint32(seq) * 3000, SSRC: 99, Marker: true},
+			Payload: []byte{0x41, 0x9a, 0x00, 0x02}}
+		data, _ := pkt.Marshal()
+		_, _ = conn.Write(data)
+	}
+}
+
+func TestLockScreenIsShownAndOperatedThroughTheHelper(t *testing.T) {
+	var locked atomic.Bool
+	in := &fakeInput{}
+	sec := &fakeSecure{}
+	m := New(Options{Input: input.NewService(in), Screen: screen.NewService(fakeScreen{}), Source: fakeSource{runs: make(chan Params, 8)},
+		Loopback: true, Secure: sec, Desktop: func() Desktop { return Desktop{Locked: locked.Load()} }})
+	t.Cleanup(m.Shutdown)
+	v := newViewer(t)
+	res, err := m.Open(context.Background(), OpenRequest{SDP: v.offer, Holder: "alice", ClientID: "tab-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v.answer(res.SDP)
+	<-v.open
+
+	// Unlocked: input goes to this process's backend.
+	v.send(v.input, `{"t":"kd","c":"KeyA"}`)
+	v.send(v.input, `{"t":"ku","c":"KeyA"}`)
+	waitFor(t, "input on the desktop", func() bool { return contains(in.calls(), "key a true", "key a false") })
+	if len(sec.got()) != 0 {
+		t.Fatalf("the helper got input while unlocked: %v", sec.got())
+	}
+
+	// Locked: the page is told it can operate the lock screen, the helper's
+	// video is forwarded and input goes to the helper, positions clamped.
+	locked.Store(true)
+	if msg := v.message("desk"); msg["locked"] != true || msg["operable"] != true {
+		t.Fatalf("desk = %v", msg)
+	}
+	waitFor(t, "lock screen video", func() bool {
+		s := m.Sessions()
+		return len(s) == 1 && s[0].Capture == "lock"
+	})
+	before := len(in.calls())
+	v.send(v.input, `{"t":"md","b":0,"x":99999,"y":5}`)
+	v.send(v.input, `{"t":"tx","s":"secret"}`)
+	waitFor(t, "input on the lock screen", func() bool { return len(sec.got()) == 2 })
+	got := sec.got()
+	if !strings.Contains(got[0], `"x":1919`) || !strings.Contains(got[1], `"s":"secret"`) {
+		t.Fatalf("helper input = %v", got)
+	}
+	if len(in.calls()) != before {
+		t.Fatalf("locked input also reached the desktop backend: %v", in.calls()[before:])
+	}
+
+	// Unlocked again: back to the desktop's own capture.
+	locked.Store(false)
+	if msg := v.message("desk"); msg["locked"] != false {
+		t.Fatalf("desk = %v", msg)
+	}
+	waitFor(t, "desktop video again", func() bool {
+		s := m.Sessions()
+		return len(s) == 1 && s[0].Capture == "fake"
+	})
 }
