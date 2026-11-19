@@ -16,6 +16,7 @@ import (
 // Config is the parsed command line.
 type Config struct {
 	Listen          string
+	AllowedHosts    []string
 	AuditLog        string
 	AuditMaxSize    int64
 	AuditMaxFiles   int
@@ -65,6 +66,8 @@ func Parse(args []string, output io.Writer) (*Config, error) {
 	recordQuota := byteSize(2 << 30)
 	var roots string
 	fs.StringVar(&cfg.Listen, "listen", "0.0.0.0:7070", "listen address")
+	var allowedHosts string
+	fs.StringVar(&allowedHosts, "allowed-hosts", "", "comma-separated host names callers may use besides addresses, localhost and this machine's name")
 	fs.StringVar(&cfg.AuditLog, "audit-log", filepath.Join(base, "audit", "audit.jsonl"), "audit JSONL path")
 	fs.Var(&auditMax, "audit-max-size", "rotate the audit file at this size (e.g. 100MiB)")
 	fs.IntVar(&cfg.AuditMaxFiles, "audit-max-files", 10, "number of audit files to keep")
@@ -99,6 +102,11 @@ func Parse(args []string, output io.Writer) (*Config, error) {
 		return nil, fmt.Errorf("unexpected arguments: %q", fs.Args())
 	}
 	cfg.AuditMaxSize = int64(auditMax)
+	for _, h := range strings.Split(allowedHosts, ",") {
+		if h = strings.TrimSpace(h); h != "" {
+			cfg.AllowedHosts = append(cfg.AllowedHosts, h)
+		}
+	}
 	cfg.RecordQuota = int64(recordQuota)
 	for _, root := range strings.Split(roots, ",") {
 		if root = strings.TrimSpace(root); root != "" {

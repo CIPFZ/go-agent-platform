@@ -8,6 +8,7 @@
 - JSON 请求体上限 8 MiB，拒绝未知字段，空请求体视为 `{}`。`file/upload` 使用 multipart，上限 1 GiB。
 - 服务器参数：`ReadHeaderTimeout` 10 秒、`IdleTimeout` 120 秒、`MaxHeaderBytes` 64 KiB。
 - 当前不鉴权、不加密（spec D9），由网络层隔离端口。
+- 带有 `Origin` 头而来源不是 `vm-agent` 自身地址的请求，以及 `Host` 不是 IP 地址、`localhost`、本机主机名或 `-allowed-hosts` 所列名称的请求，一律以 `invalid_request` 拒绝（`details.reason` 为 `foreign_origin` 或 `unknown_host`）。这只挡浏览器替网页发出的请求，脚本与客户端不受影响。
 
 ## 请求头
 

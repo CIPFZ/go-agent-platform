@@ -56,6 +56,8 @@
 | `region_out_of_bounds` | `invalid_request` | `screen/capture` | `region` 与所选显示器完全不相交 |
 | `unknown_key` | `invalid_request` | `input/key/*`、`input/batch` | 键名不在 `docs/keys.md` |
 | `foreground_lock` | `io_failed` | `window/activate` | 系统拒绝把窗口置于前台：Windows 依次尝试 `SetForegroundWindow`、`AttachThreadInput`、注入 Alt 后仍失败；Linux 窗口管理器 1 秒内未激活该窗口 |
+| `foreign_origin` | `invalid_request` | 全部 | 请求带有 `Origin` 头且它不是 `vm-agent` 自己的地址：浏览器替别的网站发来的请求。脚本与客户端不带 `Origin`，不受影响 |
+| `unknown_host` | `invalid_request` | 全部 | 请求的 `Host` 既不是 IP 地址、`localhost`、本机主机名，也不在 `-allowed-hosts` 里：防止别的网站把自己的域名指向本机来冒充同源 |
 | `remote_in_use` | `conflict` | `remote/sessions`、`input/*` | 有人正在通过网页远程桌面使用这台机器；`details.holder` 是使用者，`details.since` 是开始时间。使用权释放后重试 |
 
 ## details 其他字段

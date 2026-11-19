@@ -126,6 +126,7 @@ Windows 进程启动后首先调用 `SetProcessDpiAwarenessContext(DPI_AWARENESS
 
 ```text
 -listen             监听地址，默认 0.0.0.0:7070
+-allowed-hosts      可选，调用方可以使用的主机名，逗号分隔；IP 地址、localhost、-listen 中的主机名与本机主机名始终允许
 -audit-log          审计 JSONL 路径
 -audit-max-size     审计文件按大小轮转，默认 100MiB
 -audit-max-files    审计文件保留个数，默认 10
