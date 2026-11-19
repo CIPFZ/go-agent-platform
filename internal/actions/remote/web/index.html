@@ -105,8 +105,26 @@ function teardown() {
 
 function retry(ms) { clearTimeout(retryTimer); if (wanted) retryTimer = setTimeout(connect, ms); }
 
+// A tab can stay open across upgrades of vm-agent and would keep running the
+// page it loaded long ago. Before every connection the agent's version is
+// compared with the one this page came from, and the page reloads if they
+// differ.
+let pageVersion = null;
+async function agentVersion() {
+  try { return (await fetch('/v1/probe', { cache: 'no-store' })).headers.get('X-Agent-Version'); } catch (e) { return null; }
+}
+const pageVersionKnown = agentVersion().then((v) => { pageVersion = v; });
+
 async function connect() {
   clearTimeout(retryTimer); teardown();
+  if (!wanted) return;
+  await pageVersionKnown;
+  const version = await agentVersion();
+  if (version && pageVersion && version !== pageVersion) {
+    location.replace(location.pathname + '?auto&name=' + encodeURIComponent(holder));
+    return;
+  }
+  if (version && !pageVersion) pageVersion = version;
   if (!wanted) return;
   setState('正在连接…');
   const me = pc = new RTCPeerConnection();
