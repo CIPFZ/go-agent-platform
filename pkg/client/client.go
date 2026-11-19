@@ -32,6 +32,9 @@ import (
 type Client struct {
 	// BaseURL is the agent root, e.g. http://10.0.0.5:7070.
 	BaseURL string
+	// Token is the access token, for an agent started with
+	// -auth-token-file; empty sends none.
+	Token string
 	// HTTP is the transport; nil means http.DefaultClient. Leave its Timeout
 	// unset and use WithTimeout or the context instead, so streaming
 	// downloads are not cut off.
@@ -137,6 +140,9 @@ func (c *Client) newRequest(ctx context.Context, method, path string, query url.
 	}
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
+	}
+	if c.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}
 	if o.requestID != "" {
 		req.Header.Set("X-Request-Id", o.requestID)

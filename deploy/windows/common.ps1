@@ -16,6 +16,7 @@ $script:Current = Join-Path $script:Root 'current'
 $script:Previous = Join-Path $script:Root 'previous'
 $script:ConfigDir = Join-Path $script:Root 'config'
 $script:ArgsFile = Join-Path $script:ConfigDir 'vm-agent.args'
+$script:TokenFile = Join-Path $script:ConfigDir 'auth-token'
 $script:StateDir = Join-Path $script:Root 'state'
 $script:LockFile = Join-Path $script:StateDir 'vm-agent.lock'
 
@@ -78,15 +79,21 @@ function Get-ListenAddress {
 }
 
 # Wait-AgentReady polls /v1/probe on the configured port and returns the
-# reported version.
+# agent's version. The version is read from the X-Agent-Version header, which
+# every response carries, so an agent that demands an access token (401)
+# counts as ready too.
 function Wait-AgentReady([int]$TimeoutSeconds = 30) {
     $port = (Get-ListenAddress).Split(':')[-1]
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     while ((Get-Date) -lt $deadline) {
+        $version = $null
         try {
-            $probe = Invoke-RestMethod -Uri "http://127.0.0.1:$port/v1/probe" -TimeoutSec 2
-            if ($probe.ok) { return $probe.result.version }
-        } catch { }
+            $version = (Invoke-WebRequest -Uri "http://127.0.0.1:$port/v1/probe" -TimeoutSec 2 -UseBasicParsing).Headers['X-Agent-Version']
+        } catch {
+            $response = $_.Exception.Response
+            if ($response) { try { $version = $response.Headers['X-Agent-Version'] } catch { } }
+        }
+        if ($version) { return [string]$version }
         Start-Sleep -Milliseconds 500
     }
     throw "vm-agent did not answer on port $port within $TimeoutSeconds s; see $(Join-Path $script:StateDir 'vm-agent.log')"

@@ -119,7 +119,7 @@ func TestCodeMapping(t *testing.T) {
 		CodeInvalidRequest: {400, false}, CodeNotFound: {404, false}, CodeAmbiguous: {409, false},
 		CodeConflict: {409, false}, CodeTooLarge: {413, false}, CodeUnsupported: {501, false},
 		CodeNoDisplay: {503, true}, CodeBusy: {503, true}, CodeTimeout: {504, false},
-		CodeIOFailed: {500, false}, CodeInternal: {500, false},
+		CodeIOFailed: {500, false}, CodeInternal: {500, false}, CodeUnauthorized: {401, false},
 	}
 	for code, want := range cases {
 		if code.HTTPStatus() != want[0].(int) || code.Retryable() != want[1].(bool) {

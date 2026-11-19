@@ -127,6 +127,7 @@ Windows 进程启动后首先调用 `SetProcessDpiAwarenessContext(DPI_AWARENESS
 ```text
 -listen             监听地址，默认 0.0.0.0:7070
 -allowed-hosts      可选，调用方可以使用的主机名，逗号分隔；IP 地址、localhost、-listen 中的主机名与本机主机名始终允许
+-auth-token-file    可选，存放访问口令的文件；设置后除 GET /remote/ 外的每个请求都要带 Authorization: Bearer <口令>，文件每次请求重新读取；为空表示不鉴权
 -audit-log          审计 JSONL 路径
 -audit-max-size     审计文件按大小轮转，默认 100MiB
 -audit-max-files    审计文件保留个数，默认 10
@@ -183,7 +184,7 @@ JSON 请求体上限 8 MiB，超出返回 `too_large`。大文件写入使用 `f
 
 ### 5.2 鉴权
 
-当前阶段不实现。服务在 HTTP 处理链中预留一个中间件位置，当前唯一实现为直通；若将来部署拓扑需要，在此位置加入校验实现，不改动任何接口。凭据的生成、分发、轮换以及用户级权限均属平台职责，不在本项目范围。部署方应通过网络层（私有网段、安全组、仅平台可路由）保证 VM 端口不对非平台组件开放。
+默认不鉴权；可选的访问口令见 4.3 的 `-auth-token-file` 与 [`remote-desktop-design.md`](remote-desktop-design.md) 5.15，它适合没有平台代管的单机部署。以下是不配置口令时的原始约定：服务在 HTTP 处理链中预留一个中间件位置，默认实现为直通；若将来部署拓扑需要，在此位置加入校验实现，不改动任何接口。凭据的生成、分发、轮换以及用户级权限均属平台职责，不在本项目范围。部署方应通过网络层（私有网段、安全组、仅平台可路由）保证 VM 端口不对非平台组件开放。
 
 ### 5.3 请求头
 

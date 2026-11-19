@@ -17,6 +17,7 @@ import (
 type Config struct {
 	Listen          string
 	AllowedHosts    []string
+	AuthTokenFile   string
 	AuditLog        string
 	AuditMaxSize    int64
 	AuditMaxFiles   int
@@ -68,6 +69,7 @@ func Parse(args []string, output io.Writer) (*Config, error) {
 	fs.StringVar(&cfg.Listen, "listen", "0.0.0.0:7070", "listen address")
 	var allowedHosts string
 	fs.StringVar(&allowedHosts, "allowed-hosts", "", "comma-separated host names callers may use besides addresses, localhost and this machine's name")
+	fs.StringVar(&cfg.AuthTokenFile, "auth-token-file", "", "file holding the access token every request must carry; empty means no authentication")
 	fs.StringVar(&cfg.AuditLog, "audit-log", filepath.Join(base, "audit", "audit.jsonl"), "audit JSONL path")
 	fs.Var(&auditMax, "audit-max-size", "rotate the audit file at this size (e.g. 100MiB)")
 	fs.IntVar(&cfg.AuditMaxFiles, "audit-max-files", 10, "number of audit files to keep")

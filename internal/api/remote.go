@@ -17,7 +17,8 @@ const timeoutRemote = 10 * time.Second
 
 func (a *API) remoteRoutes() []*server.Route {
 	return []*server.Route{
-		{Method: "GET", Path: "/remote/", Action: "remote.page", Class: server.Retryable, Handler: a.remotePage},
+		// The page holds no data and asks for the token itself.
+		{Method: "GET", Path: "/remote/", Action: "remote.page", Class: server.Retryable, Public: true, Handler: a.remotePage},
 		{Method: "POST", Path: "/v1/remote/sessions", Action: "remote.open", Class: server.NonRetryable, Handler: a.remoteOpen},
 		{Method: "GET", Path: "/v1/remote/sessions", Action: "remote.list", Class: server.Retryable, Handler: a.remoteList},
 		{Method: "DELETE", Path: "/v1/remote/sessions/{session_id}", Action: "remote.close", Class: server.NonRetryable, Handler: a.remoteClose},
