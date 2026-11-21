@@ -117,6 +117,8 @@ try {
   console.log(`samples ${ok.length}/${v.samples.length}  dropped ${v.dropped}  lost ${v.lost}  nack ${v.nack}  pli ${v.pli}  browser buffer ${v.jitterBufferMs} ms  decode ${v.decodeMs} ms`);
   console.log(`received  ${summary(ok.map((s) => s.received))}`);
   console.log(`shown     ${summary(ok.map((s) => s.shown))}`);
+  // Every sample in order, to see whether slow ones come in a pattern.
+  if (args.list) console.log('received, in order: ' + v.samples.map((s) => (s && s.received !== null ? Math.round(s.received) : 'x')).join(' '));
   await cdp('Runtime.evaluate', { expression: 'release()' });
   await sleep(300);
 } catch (e) {
