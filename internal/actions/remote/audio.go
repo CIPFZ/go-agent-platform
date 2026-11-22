@@ -89,6 +89,7 @@ func (a *ffmpegAudio) runOnce(ctx context.Context, emit func(*rtp.Packet)) error
 	// The capture decides the format, so the encoder starts once it is known.
 	formats := make(chan pcmFormat, 1)
 	pr, pw := io.Pipe()
+	defer pr.Close() // unblock a late PCM write if encoder setup fails
 	captured := make(chan error, 1)
 	go func() {
 		err := captureAudio(ctx.Done(), func(f pcmFormat) { formats <- f }, func(b []byte) { _, _ = pw.Write(b) })
@@ -97,6 +98,8 @@ func (a *ffmpegAudio) runOnce(ctx context.Context, emit func(*rtp.Packet)) error
 	}()
 	var format pcmFormat
 	select {
+	case <-ctx.Done():
+		return nil
 	case format = <-formats:
 	case err := <-captured:
 		if err == nil {
