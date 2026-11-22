@@ -295,17 +295,33 @@ func (sp *splicer) apply(pkt *rtp.Packet, step uint32) {
 	sp.lastSeq, sp.lastTS = pkt.SequenceNumber, pkt.Timestamp
 }
 
-// audio forwards the desktop's sound. It is optional: when it cannot be
-// captured the session goes on without it.
+// audio forwards sound on the negotiated track. A capture that failed on
+// the lock screen gets another chance on the user's desktop.
 func (s *session) audio() {
-	err := s.m.aud.Run(s.ctx, func(pkt *rtp.Packet) {
-		s.audioSplice.apply(pkt, 480)
-		s.audioOn.Store(true)
-		_ = s.audioTrack.WriteRTP(pkt)
-	})
-	s.audioOn.Store(false)
-	if err != nil && s.ctx.Err() == nil {
+	for s.ctx.Err() == nil {
+		startedLocked := s.locked()
+		err := s.m.aud.Run(s.ctx, func(pkt *rtp.Packet) {
+			s.audioSplice.apply(pkt, 480)
+			s.audioOn.Store(true)
+			_ = s.audioTrack.WriteRTP(pkt)
+		})
+		s.audioOn.Store(false)
+		if err == nil || s.ctx.Err() != nil {
+			return
+		}
 		logf("session %s: audio: %v", s.id, err)
+		// The source has already tried to recover. Unlock can happen
+		// during those attempts or after the source gives up.
+		if !startedLocked && !s.locked() {
+			return
+		}
+		for s.locked() {
+			select {
+			case <-s.ctx.Done():
+				return
+			case <-time.After(time.Second):
+			}
+		}
 	}
 }
 
